@@ -185,3 +185,57 @@ A stray file `backend/--app-dir` also got staged: the fake server took
 *failure* paths (missing key, truncated output, concurrent delete), which a demo
 never exercises and which an SDK's exception hierarchy does not fully cover.
 
+## M5: Production Mode, Deployment, README
+
+**Built:** FastAPI serves the built UI, so `make start` runs everything as one
+process on :8000. Also added a `Makefile` (`install`, `dev`, `backend`, `frontend`,
+`build`, `start`), a two-stage `Dockerfile` with `.dockerignore`, and a README
+covering features, architecture, setup, configuration, the API, data flow, and
+known limitations.
+
+**Verified:** a Playwright run of the five demo-video steps (search, save, upload,
+summary, question) against the production server (summaries and answers came from
+the fake LLM). `make dev` start and stop were checked, along with the routing
+behavior below. **Not verified:** the Dockerfile, because Docker was not installed.
+The README says so.
+
+**`/code-review high` findings (10) and resolution:**
+
+| # | Finding | Action |
+|---|---------|--------|
+| 1 | `docker run --env-file .env` lets a local `DATA_DIR` move data out of the volume | Fixed: README passes `-e DATA_DIR=/data` |
+| 2 | My `/api/{path}` catch-all turned 405s into 404s and broke trailing-slash redirects | Fixed: removed it; serve `/`, `/favicon.svg`, and mount only `/assets` |
+| 3 | `trap 'kill 0'` in `make dev` signals the whole process group | Fixed (see below) |
+| 4 | `index.html` could be browser-cached after a rebuild, pointing at deleted asset hashes | Fixed: `Cache-Control: no-cache` on `/` |
+| 5 | Docker `--env-file` keeps quotes, so a quoted key breaks auth in the container | Documented in the README |
+| 6 | HEAD/OPTIONS and bare `/api` fell through to the static mount (non-JSON 404) | Fixed by #2 |
+| 7 | uv download cache was left inside the image | Fixed: `uv sync --no-cache` |
+| 8 | Unpinned `uv:latest` image | Fixed: pinned `0.11.17` (tag verified on GHCR) |
+| 9 | Dev backend also served a stale `dist/` on :8000 | Fixed: `SERVE_FRONTEND=false` in dev targets |
+| 10 | `make install` used `npm install`, which can rewrite the lockfile | Fixed: `npm ci` |
+
+**Finding #3 proved itself during verification:** sending TERM to `make dev`
+from the agent's non-interactive shell killed *that shell*, because it shared
+make's process group. The fix sends signals only to the two server jobs (each started with `exec`),
+and a rerun confirmed both servers stop while the caller survives.
+
+**Takeaway:** in this milestone the reviewer mostly caught *operational* issues
+(caching, signals, container configuration) rather than logic bugs. These problems
+appear only after deployment, which is why they are easy to miss.
+
+## Summary Across Milestones
+
+| Milestone | Review findings | Fixed | Documented, not changed |
+|-----------|-----------------|-------|-------------------------|
+| M0 Scaffold | 9 | 9 | 0 |
+| M1 Search | 10 | 10 | 0 |
+| M2 Library | 10 | 10 | 0 |
+| M3 PDF upload | 10 | 10 | 0 |
+| M4 LLM | 9 | 9 | 0 |
+| M5 Deployment | 10 | 9 | 1 (Docker quoting, README) |
+
+Recurring pattern: the first implementation of each milestone passed its
+happy-path test. The review then found problems on unusual inputs (Unicode,
+ligatures, nulls), under concurrency (delete mid-download, stale responses),
+on failure paths (missing key, truncated output), and in deployment details.
+

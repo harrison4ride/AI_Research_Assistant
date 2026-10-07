@@ -2,7 +2,6 @@
 
 from functools import lru_cache
 from pathlib import Path
-
 from typing import Literal
 
 from pydantic import field_validator
@@ -19,26 +18,21 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Where the SQLite DB and uploaded PDFs live. Relative paths are resolved
-    # against backend/ so the location doesn't depend on the launch directory.
+    # --- Storage ---
+    # Where the SQLite DB and uploaded PDFs live.
     data_dir: Path = BACKEND_DIR / "data"
-
-    @field_validator("data_dir")
-    @classmethod
-    def _anchor_data_dir(cls, value: Path) -> Path:
-        return value if value.is_absolute() else (BACKEND_DIR / value).resolve()
-
+    # Built frontend (npm run build). When present, the backend serves it too,
+    # so the whole app runs as one process on one port.
+    frontend_dist: Path = REPO_ROOT / "frontend" / "dist"
+    # Off in development, where Vite serves the live UI and dist/ may be stale.
+    serve_frontend: bool = True
     max_pdf_mb: int = 50
 
-    @property
-    def pdf_dir(self) -> Path:
-        return self.data_dir / "pdfs"
-
+    # --- Paper search ---
     # Optional OpenAlex identification: an email puts requests in the "polite
     # pool"; an API key raises the free daily quota.
     openalex_email: str | None = None
     openalex_api_key: str | None = None
-
 
     # --- LLM (Anthropic Claude) ---
     # Read from .env; if unset, the SDK falls back to its own credential lookup.
@@ -55,6 +49,16 @@ class Settings(BaseSettings):
     llm_history_messages: int = 20
     # Use the LLM to extract title/authors/year/abstract from uploaded PDFs.
     llm_extract_metadata: bool = True
+
+    @property
+    def pdf_dir(self) -> Path:
+        return self.data_dir / "pdfs"
+
+    @field_validator("data_dir", "frontend_dist")
+    @classmethod
+    def _anchor_relative_paths(cls, value: Path) -> Path:
+        # Resolve relative paths against backend/, so they don't depend on the launch directory.
+        return value if value.is_absolute() else (BACKEND_DIR / value).resolve()
 
 
 @lru_cache
