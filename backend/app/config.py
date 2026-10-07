@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     def _anchor_data_dir(cls, value: Path) -> Path:
         return value if value.is_absolute() else (BACKEND_DIR / value).resolve()
 
+    # Optional OpenAlex identification: an email puts requests in the "polite
+    # pool"; an API key raises the free daily quota.
+    openalex_email: str | None = None
+    openalex_api_key: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

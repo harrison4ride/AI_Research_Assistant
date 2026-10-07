@@ -1,5 +1,7 @@
 // Thin wrapper around fetch for the backend's JSON API.
 
+import type { SearchResponse, SearchSource } from './types'
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -53,4 +55,9 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
 export function getHealth() {
   return apiFetch<{ status: string }>('/api/health')
+}
+
+export function searchPapers(q: string, source: SearchSource, page: number, perPage: number) {
+  const params = new URLSearchParams({ q, source, page: String(page), per_page: String(perPage) })
+  return apiFetch<SearchResponse>(`/api/search?${params}`)
 }
