@@ -93,3 +93,47 @@ effect on the detail page. The fix remounts the page per paper id with `key`.
 ASCII-only `lower()`) that look correct in a quick English-only test. The
 reviewer reproduced each one against a scratch database before reporting it.
 
+## M3: PDF Upload and Processing (F3)
+
+**Built:** PyMuPDF text extraction with best-effort metadata (largest-font title,
+author lines between title and "Abstract", abstract section, venue-aware year);
+arXiv-id detection on page 1 with an authoritative metadata lookup;
+`POST /api/papers/upload`, `POST /api/papers/{id}/fulltext` (download an
+open-access PDF), `POST /api/papers/{id}/pdf` (attach a PDF), `GET /api/papers/{id}/pdf`,
+`PATCH /api/papers/{id}`; upload box (button + drag & drop), full-text status
+panel, and metadata edit form.
+
+**Heuristic tuning against 5 real PDFs** (2 ACL, 3 arXiv):
+
+- The abstract ran into page-1 footnotes, so footnote and venue patterns now end it.
+- The most-frequent-year rule picked *cited* years (BERT got 2018, FLARE got
+  2022), so years next to venue words ("Proceedings of NAACL-HLT 2019") now take priority.
+- LoRA's small-caps title had no spaces in the PDF text layer ("LORA:LOW-RANKADAPTATION…").
+  The arXiv lookup fixes this case.
+
+**Test-script bug (mine, not the app's):** Playwright's `text=Open` selector
+matched the "OpenAlex" badge, so the test never navigated. Opening the page
+directly and tracing network calls showed the app was fine.
+
+**`/code-review high` findings (10) and resolution:**
+
+| # | Finding | Action |
+|---|---------|--------|
+| 1 | `PATCH {"authors": null}` stored NULL, so **every** later library list returned 500 | Fixed: null maps to `[]` |
+| 2 | Author list capped at 200, so large-collaboration papers could not be edited | Raised to 10 000 |
+| 3 | PDF ligatures (`ﬃ`) broke the arXiv title check, so correct metadata was discarded | Fixed: NFKC normalization, Unicode-aware comparison |
+| 4 | A *cited* arXiv id on page 1 set the year, even when its metadata was rejected | Fixed: prefer the margin stamp (`[cs.CL]`); no year from unverified ids |
+| 5 | Full-text fetch returned a stale paper snapshot that overwrote edits made during the download | Fixed: merge only full-text fields |
+| 6 | Deleting a paper mid-download caused a 500 and left an orphaned PDF | Fixed: existence checks, `StaleDataError` handling, file cleanup |
+| 7 | 50 MB hashing and file writes ran on the event loop | Fixed: moved to a thread pool |
+| 8 | The "upload the PDF" hint created a *duplicate* entry | Fixed: new "Attach PDF" endpoint and button on the existing paper |
+| 9 | Frontend hard-coded the 50 MB limit | Removed; the backend is the single source of truth |
+| 10 | Per-paper lock dict grew without bound | Fixed: reference-counted locks |
+
+**Found while verifying the fixes:** SQLite reused a deleted paper's id, so a
+stale link could open a *different* paper. Fixed with `sqlite_autoincrement`.
+
+**Takeaway:** the agent's heuristics looked right on the happy path. Testing
+against real PDFs and an adversarial review both found failures
+(ligatures, cited ids, nulls) that a demo would not reveal.
+

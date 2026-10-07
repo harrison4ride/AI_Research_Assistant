@@ -1,6 +1,6 @@
 // Thin wrapper around fetch for the backend's JSON API.
 
-import type { Paper, PaperMeta, SavedKey, SearchResponse, SearchSource } from './types'
+import type { Paper, PaperMeta, PaperUpdate, SavedKey, SearchResponse, SearchSource } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -89,4 +89,35 @@ export function savePaper(meta: PaperMeta) {
 
 export function deletePaper(id: number) {
   return apiFetch<void>(`/api/papers/${id}`, { method: 'DELETE' })
+}
+
+function pdfForm(file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return form
+}
+
+export function uploadPdf(file: File) {
+  return apiFetch<Paper>('/api/papers/upload', { method: 'POST', body: pdfForm(file) })
+}
+
+// Attach a PDF to an existing library entry (e.g. one with no open-access PDF).
+export function attachPdf(id: number, file: File) {
+  return apiFetch<Paper>(`/api/papers/${id}/pdf`, { method: 'POST', body: pdfForm(file) })
+}
+
+export function updatePaper(id: number, patch: PaperUpdate) {
+  return apiFetch<Paper>(`/api/papers/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+}
+
+export function fetchFullText(id: number, retry = false) {
+  return apiFetch<Paper>(`/api/papers/${id}/fulltext${retry ? '?retry=true' : ''}`, { method: 'POST' })
+}
+
+export function localPdfUrl(id: number) {
+  return `/api/papers/${id}/pdf`
 }

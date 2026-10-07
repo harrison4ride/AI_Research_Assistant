@@ -30,9 +30,18 @@ interface Props {
   actions?: ReactNode
   // Show the whole abstract without the "show more" toggle (detail page).
   defaultExpanded?: boolean
+  // Link to a locally stored copy of the PDF, when the library has one.
+  localPdfHref?: string
 }
 
-export default function PaperCard({ paper, href, actions, defaultExpanded = false }: Props) {
+export default function PaperCard({
+  paper,
+  href,
+  actions,
+  defaultExpanded = false,
+  localPdfHref,
+}: Props) {
+  const pdfHref = paper.pdf_url ?? localPdfHref
   const [showFull, setShowFull] = useState(defaultExpanded)
   const titleHref = href ?? paper.url ?? undefined
   const external = !href
@@ -84,8 +93,8 @@ export default function PaperCard({ paper, href, actions, defaultExpanded = fals
             View paper ↗
           </a>
         )}
-        {paper.pdf_url && (
-          <a href={paper.pdf_url} target="_blank" rel="noreferrer">
+        {pdfHref && (
+          <a href={pdfHref} target="_blank" rel="noreferrer">
             PDF ↗
           </a>
         )}

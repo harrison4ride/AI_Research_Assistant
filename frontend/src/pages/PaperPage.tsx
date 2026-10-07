@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
-import { ApiError, deletePaper, errorMessage, getPaper } from '../api'
+import { ApiError, deletePaper, errorMessage, getPaper, localPdfUrl } from '../api'
+import EditPaperForm from '../components/EditPaperForm'
+import FullTextStatus from '../components/FullTextStatus'
 import PaperCard from '../components/PaperCard'
 import type { Paper } from '../types'
 
 export default function PaperPage({ id }: { id: number }) {
   const [paper, setPaper] = useState<Paper | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -43,18 +46,37 @@ export default function PaperPage({ id }: { id: number }) {
       {!paper && !error && <p className="muted loading">Loading…</p>}
       {paper && (
         <>
-          <PaperCard
+          {editing ? (
+            <EditPaperForm
+              paper={paper}
+              onSaved={(p) => {
+                setPaper(p)
+                setEditing(false)
+              }}
+              onCancel={() => setEditing(false)}
+            />
+          ) : (
+            <PaperCard
+              paper={paper}
+              defaultExpanded
+              localPdfHref={paper.has_pdf ? localPdfUrl(paper.id) : undefined}
+              actions={
+                <>
+                  <button className="btn small" onClick={() => setEditing(true)}>
+                    Edit details
+                  </button>
+                  <button className="btn small danger" onClick={remove}>
+                    Remove
+                  </button>
+                </>
+              }
+            />
+          )}
+          <p className="muted saved-on">Saved {new Date(paper.created_at).toLocaleString()}</p>
+          <FullTextStatus
             paper={paper}
-            defaultExpanded
-            actions={
-              <button className="btn small danger" onClick={remove}>
-                Remove
-              </button>
-            }
+            onChange={(fields) => setPaper((prev) => (prev ? { ...prev, ...fields } : prev))}
           />
-          <p className="muted saved-on">
-            Saved {new Date(paper.created_at).toLocaleString()}
-          </p>
         </>
       )}
     </section>

@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     def _anchor_data_dir(cls, value: Path) -> Path:
         return value if value.is_absolute() else (BACKEND_DIR / value).resolve()
 
+    max_pdf_mb: int = 50
+
+    @property
+    def pdf_dir(self) -> Path:
+        return self.data_dir / "pdfs"
+
     # Optional OpenAlex identification: an email puts requests in the "polite
     # pool"; an API key raises the free daily quota.
     openalex_email: str | None = None

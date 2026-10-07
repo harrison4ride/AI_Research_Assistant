@@ -33,7 +33,12 @@ class UTCDateTime(TypeDecorator):
 
 class Paper(Base):
     __tablename__ = "papers"
-    __table_args__ = (UniqueConstraint("source", "external_id", name="uq_paper_source_external_id"),)
+    __table_args__ = (
+        UniqueConstraint("source", "external_id", name="uq_paper_source_external_id"),
+        # Never reuse a deleted paper's id: stale links or in-flight requests for
+        # it must not land on a different paper.
+        {"sqlite_autoincrement": True},
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source: Mapped[str] = mapped_column(String(20))  # arxiv | openalex | upload
@@ -46,4 +51,18 @@ class Paper(Base):
     pdf_url: Mapped[str | None] = mapped_column(Text)
     venue: Mapped[str | None] = mapped_column(Text)
     doi: Mapped[str | None] = mapped_column(String(200))
+
+    # Local PDF (file name inside <data_dir>/pdfs) and its extracted text.
+    pdf_path: Mapped[str | None] = mapped_column(String(300))
+    page_count: Mapped[int | None] = mapped_column(Integer)
+    # Large; only loaded when explicitly accessed (LLM calls), never for list views.
+    full_text: Mapped[str | None] = mapped_column(Text, deferred=True)
+    # None = not attempted yet | "ok" | "unavailable" (no PDF link) | "error"
+    full_text_status: Mapped[str | None] = mapped_column(String(20))
+    full_text_error: Mapped[str | None] = mapped_column(Text)
+
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    @property
+    def has_pdf(self) -> bool:
+        return self.pdf_path is not None

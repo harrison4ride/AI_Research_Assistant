@@ -108,16 +108,8 @@ async def _fetch(params: dict) -> httpx.Response:
             _last_finished = time.monotonic()
 
 
-async def search(query: str, page: int, per_page: int) -> tuple[list[PaperMeta], int | None]:
-    search_query = build_query(query)
-    if search_query is None:
-        return [], 0
-    params = {
-        "search_query": search_query,
-        "start": (page - 1) * per_page,
-        "max_results": per_page,
-        "sortBy": "relevance",
-    }
+async def _query(params: dict) -> ET.Element:
+    """Run one arXiv API call and return the parsed feed, raising UpstreamError on failure."""
     try:
         resp = await _fetch(params)
     except httpx.TimeoutException as exc:
@@ -131,9 +123,30 @@ async def search(query: str, page: int, per_page: int) -> tuple[list[PaperMeta],
         root = ET.fromstring(resp.content)
     except ET.ParseError as exc:
         raise UpstreamError("arXiv returned malformed XML.") from exc
-
     if error := _api_error(root):
         raise UpstreamError(f"arXiv rejected the query: {error}", 400)
+    return root
+
+
+async def search(query: str, page: int, per_page: int) -> tuple[list[PaperMeta], int | None]:
+    search_query = build_query(query)
+    if search_query is None:
+        return [], 0
+    root = await _query({
+        "search_query": search_query,
+        "start": (page - 1) * per_page,
+        "max_results": per_page,
+        "sortBy": "relevance",
+    })
     total_text = _text(root.find("os:totalResults", NS))
     total = int(total_text) if total_text and total_text.isdigit() else None
     return [parse_entry(e) for e in root.findall("a:entry", NS)], total
+
+
+async def fetch_by_id(arxiv_id: str) -> PaperMeta | None:
+    """Look up one paper by arXiv id (e.g. "1706.03762"); None if arXiv doesn't know it."""
+    root = await _query({"id_list": arxiv_id, "max_results": 1})
+    entry = root.find("a:entry", NS)
+    if entry is None or entry.find("a:title", NS) is None:
+        return None
+    return parse_entry(entry)

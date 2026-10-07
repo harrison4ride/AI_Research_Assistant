@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SearchSource = Literal["arxiv", "openalex"]
 
@@ -39,6 +39,32 @@ class PaperOut(PaperMeta):
 
     id: int
     created_at: datetime
+    has_pdf: bool = False
+    page_count: int | None = None
+    full_text_status: Literal["ok", "unavailable", "error"] | None = None
+    full_text_error: str | None = None
+
+
+class PaperUpdate(BaseModel):
+    """Editable metadata fields (e.g. to correct what was extracted from a PDF)."""
+
+    title: str | None = Field(None, min_length=1, max_length=500)
+    # Large collaborations list thousands of authors; the form sends the full list.
+    authors: list[str] | None = Field(None, max_length=10000)
+    year: int | None = Field(None, ge=1000, le=2100)
+    abstract: str | None = Field(None, max_length=20000)
+
+    @field_validator("title")
+    @classmethod
+    def _title_not_blank(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("title must not be blank")
+        return v.strip() if v else v
+
+    @field_validator("authors")
+    @classmethod
+    def _clean_authors(cls, v: list[str] | None) -> list[str] | None:
+        return [a.strip() for a in v if a.strip()] if v is not None else v
 
 
 class SavedKey(BaseModel):

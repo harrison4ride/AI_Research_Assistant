@@ -20,6 +20,33 @@ export interface PaperMeta {
 export interface Paper extends PaperMeta {
   id: number
   created_at: string
+  has_pdf: boolean
+  page_count: number | null
+  // null = not attempted yet
+  full_text_status: 'ok' | 'unavailable' | 'error' | null
+  full_text_error: string | null
+}
+
+// The fields that change when a paper's full text is fetched or attached.
+export type FullTextFields = Pick<
+  Paper,
+  'has_pdf' | 'page_count' | 'full_text_status' | 'full_text_error'
+>
+
+export function fullTextFields(p: Paper): FullTextFields {
+  return {
+    has_pdf: p.has_pdf,
+    page_count: p.page_count,
+    full_text_status: p.full_text_status,
+    full_text_error: p.full_text_error,
+  }
+}
+
+export interface PaperUpdate {
+  title?: string
+  authors?: string[]
+  year?: number | null
+  abstract?: string | null
 }
 
 export interface SavedKey {

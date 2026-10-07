@@ -492,3 +492,85 @@ a.btn {
 .saved-on {
   font-size: 0.85rem;
 }
+
+/* ---- Upload ---- */
+
+.upload-box {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 0.25rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--surface);
+}
+
+.upload-box.dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ---- Paper detail ---- */
+
+.status-box {
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.9rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.status-box.info {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.status-box.ok {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+}
+
+.status-box.warn {
+  background: color-mix(in srgb, #d99a00 14%, transparent);
+  color: var(--text);
+}
+
+.status-box.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.edit-form textarea {
+  resize: vertical;
+  font-weight: 400;
+}
+
+.edit-form .year-input {
+  max-width: 8rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.status-box p {
+  margin: 0;
+}
+
+.status-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}

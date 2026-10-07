@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { deletePaper, errorMessage, listPapers } from '../api'
+import { deletePaper, errorMessage, listPapers, localPdfUrl } from '../api'
 import PaperCard from '../components/PaperCard'
+import UploadBox from '../components/UploadBox'
 import type { Paper } from '../types'
 
 export default function LibraryPage() {
@@ -51,6 +52,8 @@ export default function LibraryPage() {
         )}
       </div>
 
+      <UploadBox onUploaded={(paper) => (window.location.hash = `#/paper/${paper.id}`)} />
+
       <input
         className="input filter-input"
         type="search"
@@ -83,6 +86,7 @@ export default function LibraryPage() {
             key={paper.id}
             paper={paper}
             href={`#/paper/${paper.id}`}
+            localPdfHref={paper.has_pdf ? localPdfUrl(paper.id) : undefined}
             actions={
               <>
                 <a className="btn small primary" href={`#/paper/${paper.id}`}>
