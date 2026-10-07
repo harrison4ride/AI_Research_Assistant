@@ -59,3 +59,37 @@ The agent also caught that "Load more" could append duplicates and produce React
 **Takeaway:** findings #1 and #2 were real, silent data bugs that the
 happy-path manual test did not reveal. Both only show up on unusual inputs.
 
+## M2: Local Library (F2)
+
+**Built:** SQLAlchemy `Paper` model on SQLite (`backend/data/app.db`);
+`GET/POST /api/papers`, `GET/DELETE /api/papers/{id}`, `GET /api/papers/keys`;
+per-result "Save to library" button with saved state; Library page with filter,
+open, and remove; paper detail page. A small `init_db` helper adds new nullable
+columns so later milestones don't require deleting the database.
+
+**Verified:** the Playwright script saved 2 papers, reloaded the page, filtered,
+restarted the backend (data persisted), opened a detail page, deleted a paper,
+and opened an unknown id.
+
+**Self-caught before review:** the linter flagged a `setState` call inside an
+effect on the detail page. The fix remounts the page per paper id with `key`.
+
+**`/code-review high` findings (10) and resolution:**
+
+| # | Finding | Action |
+|---|---------|--------|
+| 1 | SQLite drops timezone; `created_at` serialized without `Z`, so "Saved at" showed hours off | Fixed: `UTCDateTime` TypeDecorator re-attaches UTC |
+| 2 | Author filter ran `ILIKE` on JSON text, where `ü` is stored as `ü`, so "Müller" never matched | Fixed: Unicode-aware filtering in Python; JSON stored with `ensure_ascii=False` |
+| 3 | SQLite `lower()` is ASCII-only, so "über" did not match "Über" | Fixed: `casefold()` + NFKC normalization |
+| 4 | Saved-keys response could overwrite a save made while it was in flight | Fixed: merge instead of replace |
+| 5 | In-flight list request could resurrect a just-deleted paper | Fixed: track deleted ids |
+| 6 | Filter input allowed more than 200 chars, causing a backend 422 | Fixed: `maxLength={200}` |
+| 7 | Column-migration helper silently skipped NOT NULL columns, so the first insert would fail | Fixed: fail fast at startup with a clear message |
+| 8 | Same paper saved from arXiv and from OpenAlex created two rows | Fixed: dedupe on DOI and arXiv id vs. arXiv DataCite DOI |
+| 9 | Saved-key format duplicated by hand | Fixed: shared `sourceKey()` |
+| 10 | `err instanceof Error ? …` copied 6 times | Fixed: `errorMessage()` helper |
+
+**Takeaway:** findings 1–3 are SQLite-specific behaviors (timezone and
+ASCII-only `lower()`) that look correct in a quick English-only test. The
+reviewer reproduced each one against a scratch database before reporting it.
+

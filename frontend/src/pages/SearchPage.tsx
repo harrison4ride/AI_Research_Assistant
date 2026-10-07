@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { searchPapers } from '../api'
+import { errorMessage, getSavedKeys, searchPapers } from '../api'
 import PaperCard from '../components/PaperCard'
-import { paperKey, SOURCE_LABEL, type PaperMeta, type SearchSource } from '../types'
+import SaveButton from '../components/SaveButton'
+import { paperKey, sourceKey, SOURCE_LABEL, type PaperMeta, type SearchSource } from '../types'
 
 const PER_PAGE = 10
 const MAX_PAGE = 100 // backend limit on the `page` parameter
@@ -58,6 +59,30 @@ export default function SearchPage() {
   const [error, setError] = useState<string | null>(null)
   // Only the most recent request may update the page; older responses are dropped.
   const requestId = useRef(0)
+  // paperKey -> library id for results that are already saved.
+  const [saved, setSaved] = useState<Map<string, number>>(new Map())
+
+  // Restored results may have been saved or deleted elsewhere; ask the library.
+  useEffect(() => {
+    let cancelled = false
+    getSavedKeys()
+      .then((keys) => {
+        if (cancelled) return
+        const fromServer = keys.map((k) => [sourceKey(k.source, k.external_id), k.id] as const)
+        // Merge: keep anything saved while this request was in flight.
+        setSaved((prev) => new Map([...fromServer, ...prev]))
+      })
+      .catch(() => {
+        // Non-fatal: results just won't show their saved state.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  function markSaved(paper: PaperMeta, id: number) {
+    setSaved((prev) => new Map(prev).set(paperKey(paper), id))
+  }
 
   useEffect(() => {
     try {
@@ -89,7 +114,7 @@ export default function SearchPage() {
       })
     } catch (err) {
       if (id !== requestId.current) return
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       if (id === requestId.current) setLoading(false)
     }
@@ -170,7 +195,17 @@ export default function SearchPage() {
 
       <div className="paper-list">
         {state.results.map((paper) => (
-          <PaperCard key={paperKey(paper)} paper={paper} />
+          <PaperCard
+            key={paperKey(paper)}
+            paper={paper}
+            actions={
+              <SaveButton
+                paper={paper}
+                savedId={saved.get(paperKey(paper))}
+                onSaved={(id) => markSaved(paper, id)}
+              />
+            }
+          />
         ))}
       </div>
 

@@ -1,8 +1,9 @@
 """Pydantic models shared by the API routes."""
 
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 SearchSource = Literal["arxiv", "openalex"]
 
@@ -29,3 +30,20 @@ class SearchResponse(BaseModel):
     per_page: int
     total: int | None
     results: list[PaperMeta]
+
+
+class PaperOut(PaperMeta):
+    """A paper stored in the local library."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+
+
+class SavedKey(BaseModel):
+    """Maps a search result identity to its library id."""
+
+    source: str
+    external_id: str
+    id: int

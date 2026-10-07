@@ -59,7 +59,8 @@ export default function App() {
       <main className="content">
         {route.name === 'search' && <SearchPage />}
         {route.name === 'library' && <LibraryPage />}
-        {route.name === 'paper' && <PaperPage id={route.id} />}
+        {/* key: remount per paper so no state leaks between papers */}
+        {route.name === 'paper' && <PaperPage key={route.id} id={route.id} />}
       </main>
     </div>
   )

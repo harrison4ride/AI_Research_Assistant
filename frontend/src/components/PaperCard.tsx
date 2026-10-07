@@ -28,10 +28,12 @@ interface Props {
   // Optional title link target (e.g. the library detail page); falls back to the external URL.
   href?: string
   actions?: ReactNode
+  // Show the whole abstract without the "show more" toggle (detail page).
+  defaultExpanded?: boolean
 }
 
-export default function PaperCard({ paper, href, actions }: Props) {
-  const [showFull, setShowFull] = useState(false)
+export default function PaperCard({ paper, href, actions, defaultExpanded = false }: Props) {
+  const [showFull, setShowFull] = useState(defaultExpanded)
   const titleHref = href ?? paper.url ?? undefined
   const external = !href
 
@@ -65,9 +67,11 @@ export default function PaperCard({ paper, href, actions }: Props) {
       {paper.abstract ? (
         <div className="abstract-wrap">
           <p className={showFull ? 'abstract' : 'abstract clamped'}>{paper.abstract}</p>
-          <button type="button" className="link-button" onClick={() => setShowFull(!showFull)}>
-            {showFull ? 'Show less' : 'Show full abstract'}
-          </button>
+          {!defaultExpanded && (
+            <button type="button" className="link-button" onClick={() => setShowFull(!showFull)}>
+              {showFull ? 'Show less' : 'Show full abstract'}
+            </button>
+          )}
         </div>
       ) : (
         <p className="abstract muted">No abstract available.</p>

@@ -16,6 +16,18 @@ export interface PaperMeta {
   doi: string | null
 }
 
+// A paper stored in the local library.
+export interface Paper extends PaperMeta {
+  id: number
+  created_at: string
+}
+
+export interface SavedKey {
+  source: string
+  external_id: string
+  id: number
+}
+
 export interface SearchResponse {
   query: string
   source: SearchSource
@@ -32,6 +44,10 @@ export const SOURCE_LABEL: Record<PaperSource, string> = {
 }
 
 // Stable identity for a search result (external ids are unique per source).
+export function sourceKey(source: string, id: string): string {
+  return `${source}:${id}`
+}
+
 export function paperKey(p: PaperMeta): string {
-  return `${p.source}:${p.external_id ?? p.url ?? p.doi ?? p.title}`
+  return sourceKey(p.source, p.external_id ?? p.url ?? p.doi ?? p.title)
 }

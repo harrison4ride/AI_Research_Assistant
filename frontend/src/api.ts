@@ -1,6 +1,6 @@
 // Thin wrapper around fetch for the backend's JSON API.
 
-import type { SearchResponse, SearchSource } from './types'
+import type { Paper, PaperMeta, SavedKey, SearchResponse, SearchSource } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -8,6 +8,10 @@ export class ApiError extends Error {
     super(message)
     this.status = status
   }
+}
+
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }
 
 // FastAPI returns `detail` as a string for HTTPException and as a list of
@@ -60,4 +64,29 @@ export function getHealth() {
 export function searchPapers(q: string, source: SearchSource, page: number, perPage: number) {
   const params = new URLSearchParams({ q, source, page: String(page), per_page: String(perPage) })
   return apiFetch<SearchResponse>(`/api/search?${params}`)
+}
+
+export function listPapers(q?: string) {
+  const params = q ? `?${new URLSearchParams({ q })}` : ''
+  return apiFetch<Paper[]>(`/api/papers${params}`)
+}
+
+export function getSavedKeys() {
+  return apiFetch<SavedKey[]>('/api/papers/keys')
+}
+
+export function getPaper(id: number) {
+  return apiFetch<Paper>(`/api/papers/${id}`)
+}
+
+export function savePaper(meta: PaperMeta) {
+  return apiFetch<Paper>('/api/papers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(meta),
+  })
+}
+
+export function deletePaper(id: number) {
+  return apiFetch<void>(`/api/papers/${id}`, { method: 'DELETE' })
 }

@@ -437,3 +437,58 @@ code {
     gap: 0.5rem;
   }
 }
+
+/* ---- Library ---- */
+
+.page-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.filter-input {
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.saved-label {
+  color: var(--success);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.save-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.save-error {
+  color: var(--danger);
+  font-size: 0.8rem;
+  max-width: 220px;
+  text-align: right;
+}
+
+a.btn {
+  text-decoration: none;
+  display: inline-block;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.saved-on {
+  font-size: 0.85rem;
+}
