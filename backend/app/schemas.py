@@ -45,6 +45,42 @@ class PaperOut(PaperMeta):
     full_text_error: str | None = None
 
 
+class PaperDetail(PaperOut):
+    """A single paper with its stored summary (the list view omits it)."""
+
+    summary: str | None = None
+    summary_model: str | None = None
+    summary_context: Literal["full_text", "abstract"] | None = None
+    summary_created_at: datetime | None = None
+
+
+class ChatMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    role: Literal["user", "assistant"]
+    content: str
+    model: str | None = None
+    context: Literal["full_text", "abstract"] | None = None
+    created_at: datetime
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("question")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("question must not be blank")
+        return v.strip()
+
+
+class AppConfig(BaseModel):
+    llm_model: str
+    llm_key_set: bool
+
+
 class PaperUpdate(BaseModel):
     """Editable metadata fields (e.g. to correct what was extracted from a PDF)."""
 

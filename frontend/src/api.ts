@@ -1,6 +1,17 @@
 // Thin wrapper around fetch for the backend's JSON API.
 
-import type { Paper, PaperMeta, PaperUpdate, SavedKey, SearchResponse, SearchSource } from './types'
+import type {
+  AppConfig,
+  ChatMessage,
+  Paper,
+  PaperDetail,
+  PaperMeta,
+  PaperUpdate,
+  SavedKey,
+  SearchResponse,
+  SearchSource,
+  StreamEvent,
+} from './types'
 
 export class ApiError extends Error {
   status: number
@@ -76,7 +87,7 @@ export function getSavedKeys() {
 }
 
 export function getPaper(id: number) {
-  return apiFetch<Paper>(`/api/papers/${id}`)
+  return apiFetch<PaperDetail>(`/api/papers/${id}`)
 }
 
 export function savePaper(meta: PaperMeta) {
@@ -107,7 +118,7 @@ export function attachPdf(id: number, file: File) {
 }
 
 export function updatePaper(id: number, patch: PaperUpdate) {
-  return apiFetch<Paper>(`/api/papers/${id}`, {
+  return apiFetch<PaperDetail>(`/api/papers/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
@@ -120,4 +131,64 @@ export function fetchFullText(id: number, retry = false) {
 
 export function localPdfUrl(id: number) {
   return `/api/papers/${id}/pdf`
+}
+
+export function getConfig() {
+  return apiFetch<AppConfig>('/api/config')
+}
+
+// POST and read a newline-delimited JSON event stream, calling onEvent per event.
+async function streamEvents(
+  path: string,
+  body: unknown,
+  onEvent: (event: StreamEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  let res: Response
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
+    })
+  } catch (err) {
+    if (signal.aborted) throw err
+    throw new ApiError(0, 'Network error: cannot reach the backend.')
+  }
+  if (!res.ok) throw await errorFrom(res)
+  if (!res.body) throw new ApiError(res.status, 'The response has no body.')
+
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += value
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) if (line.trim()) onEvent(JSON.parse(line) as StreamEvent)
+  }
+  if (buffer.trim()) onEvent(JSON.parse(buffer) as StreamEvent)
+}
+
+export function streamSummary(id: number, onEvent: (e: StreamEvent) => void, signal: AbortSignal) {
+  return streamEvents(`/api/papers/${id}/summary`, undefined, onEvent, signal)
+}
+
+export function streamAnswer(
+  id: number,
+  question: string,
+  onEvent: (e: StreamEvent) => void,
+  signal: AbortSignal,
+) {
+  return streamEvents(`/api/papers/${id}/chat`, { question }, onEvent, signal)
+}
+
+export function getChat(id: number) {
+  return apiFetch<ChatMessage[]>(`/api/papers/${id}/chat`)
+}
+
+export function clearChat(id: number) {
+  return apiFetch<void>(`/api/papers/${id}/chat`, { method: 'DELETE' })
 }

@@ -15,8 +15,8 @@ from sqlalchemy.orm.exc import StaleDataError
 from ..config import get_settings
 from ..db import get_db
 from ..models import Paper
-from ..schemas import PaperMeta, PaperOut, PaperUpdate, SavedKey
-from ..services import arxiv, pdf
+from ..schemas import PaperDetail, PaperMeta, PaperOut, PaperUpdate, SavedKey
+from ..services import arxiv, llm, pdf
 from ..services.fulltext import (
     attach_pdf,
     ensure_full_text,
@@ -155,6 +155,24 @@ async def _read_pdf_upload(file: UploadFile) -> tuple[bytes, pdf.ExtractedPdf]:
     return data, extracted
 
 
+def _merge_llm_metadata(paper: Paper, found: llm.ExtractedMetadata, extracted: pdf.ExtractedPdf) -> None:
+    """Prefer the LLM's reading over the heuristics, if its title really is on the first pages.
+
+    A title that isn't in the text means the answer can't be trusted, so then
+    none of its fields are used.
+    """
+    if not (found.title.strip() and pdf.title_on_page(found.title, extracted.text[:15000])):
+        return
+    paper.title = found.title.strip()
+    authors = [a.strip() for a in found.authors if a.strip()]
+    if authors:
+        paper.authors = authors
+    if found.year is not None:
+        paper.year = found.year
+    if found.abstract and len(found.abstract.strip()) >= 100:
+        paper.abstract = found.abstract.strip()
+
+
 @router.post("/upload", response_model=PaperOut, status_code=status.HTTP_201_CREATED)
 async def upload_pdf(
     response: Response,
@@ -178,7 +196,6 @@ async def upload_pdf(
         authors=extracted.authors,
         year=extracted.year,
         abstract=extracted.abstract,
-        pdf_path=await run_in_threadpool(store_pdf, data),
         page_count=extracted.page_count,
         full_text=extracted.text,
         full_text_status="ok",
@@ -191,6 +208,11 @@ async def upload_pdf(
         paper.url = meta.url
         paper.venue = meta.venue
         paper.doi = meta.doi
+    elif found := await llm.extract_metadata(extracted.text[:15000]):
+        _merge_llm_metadata(paper, found, extracted)
+
+    # Store the file last, once nothing that could fail is left before the commit.
+    paper.pdf_path = await run_in_threadpool(store_pdf, data)
 
     db.add(paper)
     try:
@@ -206,12 +228,12 @@ async def upload_pdf(
     return paper
 
 
-@router.get("/{paper_id}", response_model=PaperOut)
+@router.get("/{paper_id}", response_model=PaperDetail)
 def get_paper(paper_id: int, db: Session = Depends(get_db)) -> Paper:
     return get_paper_or_404(paper_id, db)
 
 
-@router.patch("/{paper_id}", response_model=PaperOut)
+@router.patch("/{paper_id}", response_model=PaperDetail)
 def update_paper(paper_id: int, update: PaperUpdate, db: Session = Depends(get_db)) -> Paper:
     """Correct a paper's metadata (title, authors, year, abstract)."""
     paper = get_paper_or_404(paper_id, db)

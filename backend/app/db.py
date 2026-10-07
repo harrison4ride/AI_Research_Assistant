@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import get_settings
@@ -28,6 +28,14 @@ engine = create_engine(
     json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
 )
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+
+@event.listens_for(engine, "connect")
+def _enable_foreign_keys(dbapi_connection, _record) -> None:
+    # SQLite ignores FOREIGN KEY / ON DELETE CASCADE unless this is set per connection.
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 def init_db() -> None:

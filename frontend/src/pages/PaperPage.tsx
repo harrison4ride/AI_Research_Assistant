@@ -1,14 +1,25 @@
 import { useEffect, useState } from 'react'
-import { ApiError, deletePaper, errorMessage, getPaper, localPdfUrl } from '../api'
+import { ApiError, deletePaper, errorMessage, getConfig, getPaper, localPdfUrl } from '../api'
+import ChatPanel from '../components/ChatPanel'
 import EditPaperForm from '../components/EditPaperForm'
 import FullTextStatus from '../components/FullTextStatus'
 import PaperCard from '../components/PaperCard'
-import type { Paper } from '../types'
+import SummaryPanel from '../components/SummaryPanel'
+import type { AppConfig, PaperDetail } from '../types'
 
 export default function PaperPage({ id }: { id: number }) {
-  const [paper, setPaper] = useState<Paper | null>(null)
+  const [paper, setPaper] = useState<PaperDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
+  const [llm, setLlm] = useState<AppConfig | null>(null)
+
+  useEffect(() => {
+    getConfig()
+      .then(setLlm)
+      .catch(() => {
+        // Unknown: let the LLM requests themselves report problems.
+      })
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -77,6 +88,12 @@ export default function PaperPage({ id }: { id: number }) {
             paper={paper}
             onChange={(fields) => setPaper((prev) => (prev ? { ...prev, ...fields } : prev))}
           />
+          <SummaryPanel
+            paper={paper}
+            llm={llm}
+            onSummary={(fields) => setPaper((prev) => (prev ? { ...prev, ...fields } : prev))}
+          />
+          <ChatPanel paperId={paper.id} llm={llm} />
         </>
       )}
     </section>

@@ -10,8 +10,7 @@
    ├── search service ──► arXiv API, OpenAlex API        (F1)
    ├── library (SQLAlchemy) ──► SQLite  data/app.db      (F2)
    ├── PDF service (PyMuPDF) ──► data/pdfs/*.pdf         (F3)
-   └── LLM service ──► Anthropic Claude (default)         (F4, F5)
-                       or any OpenAI-compatible endpoint
+   └── LLM service ──► Anthropic Claude API               (F4, F5)
 ```
 
 ### Key design decisions
@@ -28,6 +27,12 @@
 - **Metadata extraction from uploads (F3):** an arXiv-ID lookup → LLM
   extraction from the first pages → font-size/regex heuristics, in that order of
   preference; the user can edit fields afterwards.
+- **LLM:** Claude (`claude-opus-5` by default, set by `LLM_MODEL`) through the
+  official `anthropic` SDK, with streaming, adaptive thinking, and server-side
+  refusal fallbacks. The paper sits in the system prompt behind a prompt-cache
+  breakpoint, so the summary and every follow-up question reuse it. An
+  OpenAI-compatible provider was planned at first, but was dropped to keep a
+  single, well-supported integration.
 - **Persistence:** SQLite file under `backend/data/` (git-ignored). Summaries and
   Q&A history are stored too, so they survive restarts.
 - **Secrets:** read from `.env` (git-ignored); `.env.example` documents the variables.
@@ -45,5 +50,5 @@ fix findings → commit. Review outcomes are logged in `docs/DEVLOG.md`.
 | M1 | Paper search: arXiv + OpenAlex clients, `/api/search`, search UI with result cards | F1 |
 | M2 | SQLite library: paper model, save / list / get / delete endpoints, library UI, de-duplication | F2 |
 | M3 | PDF upload + processing: upload endpoint, PDF storage, text + metadata extraction, full-text fetch for saved search papers, editable metadata | F3 |
-| M4 | LLM: provider abstraction, streamed summary, streamed Q&A chat with persisted history, LLM-assisted metadata extraction | F4, F5 |
+| M4 | LLM: Claude integration, streamed summary, streamed Q&A chat with persisted history, LLM-assisted metadata extraction | F4, F5 |
 | M5 | README, single-process production build, deployment config, end-to-end verification | submission |

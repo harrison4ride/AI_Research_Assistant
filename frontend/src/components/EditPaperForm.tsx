@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { errorMessage, updatePaper } from '../api'
-import type { Paper } from '../types'
+import type { PaperDetail } from '../types'
 
 interface Props {
-  paper: Paper
-  onSaved: (paper: Paper) => void
+  paper: PaperDetail
+  onSaved: (paper: PaperDetail) => void
   onCancel: () => void
 }
 

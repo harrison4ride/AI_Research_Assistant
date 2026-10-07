@@ -27,6 +27,43 @@ export interface Paper extends PaperMeta {
   full_text_error: string | null
 }
 
+export type ContextKind = 'full_text' | 'abstract'
+
+// A paper with its stored summary (returned by GET /api/papers/{id}).
+export interface PaperDetail extends Paper {
+  summary: string | null
+  summary_model: string | null
+  summary_context: ContextKind | null
+  summary_created_at: string | null
+}
+
+export type SummaryFields = Pick<
+  PaperDetail,
+  'summary' | 'summary_model' | 'summary_context' | 'summary_created_at'
+>
+
+export interface ChatMessage {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  model: string | null
+  context: ContextKind | null
+  created_at: string
+}
+
+export interface AppConfig {
+  llm_model: string
+  llm_key_set: boolean
+}
+
+// Events streamed (as newline-delimited JSON) by the summary and chat endpoints.
+export type StreamEvent =
+  | { type: 'meta'; context: ContextKind; truncated: boolean }
+  | { type: 'text'; text: string }
+  | { type: 'reset' }
+  | { type: 'error'; message: string }
+  | { type: 'done'; paper?: PaperDetail; messages?: ChatMessage[] }
+
 // The fields that change when a paper's full text is fetched or attached.
 export type FullTextFields = Pick<
   Paper,

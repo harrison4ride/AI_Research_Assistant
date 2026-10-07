@@ -137,3 +137,51 @@ stale link could open a *different* paper. Fixed with `sqlite_autoincrement`.
 against real PDFs and an adversarial review both found failures
 (ligatures, cited ids, nulls) that a demo would not reveal.
 
+## M4: LLM Summaries and Q&A (F4, F5)
+
+**Built:** Claude integration through the official `anthropic` SDK
+(`claude-opus-5`, adaptive thinking, `effort` from `.env`, server-side refusal
+fallbacks via `fallbacks: "default"`). The paper's full text goes in the system
+prompt behind a prompt-cache breakpoint, so the summary and every Q&A turn share
+one cached prefix. `POST /api/papers/{id}/summary` and
+`POST /api/papers/{id}/chat` stream newline-delimited JSON (`meta`, `text`,
+`reset`, `done`, `error`); results are saved only after a complete answer.
+Q&A history is persisted per paper. Uploads use structured output
+(`messages.parse`) to read metadata from the first pages. The UI has a Summary
+panel, a chat panel with the assignment's five example questions, and a notice
+when no API key is configured.
+
+**How it was verified without an API key:** a local fake Messages API
+(SSE replay) exercised normal answers, refusals, a mid-stream fallback switch,
+and structured output. The recorded request bodies confirmed identical system
+blocks across calls (cache-friendly), the fallback beta header, and that a
+refused turn is left out of later history. **A real API call still needs a key.**
+
+**Decision change:** the original plan included an OpenAI-compatible provider.
+It was dropped in favor of one Claude integration (the Claude API guidance
+advises against OpenAI-compatible shims), and `PLAN.md` was updated.
+
+**Found during verification (before review):** the fake LLM returned another
+paper's metadata. The title check correctly rejected the title, but the
+authors and year were still merged. The merge is now all-or-nothing.
+A stray file `backend/--app-dir` also got staged: the fake server took
+`sys.argv[1]` as its log path. It was removed before commit.
+
+**`/code-review high` findings (9) and resolution:**
+
+| # | Finding | Action |
+|---|---------|--------|
+| 1 | `messages.parse()` raises `ValidationError` on truncated or refused JSON, so the upload returned 500 and left an orphaned PDF | Fixed: catch everything in extraction; store the file only after metadata is final |
+| 2 | Missing credentials raise `TypeError` (not `AnthropicError`), so the stream dropped instead of saying "set ANTHROPIC_API_KEY" | Fixed: detect and map to a clear message |
+| 3 | Unexpected errors mid-stream (e.g. a DB error during save) dropped the connection with no error event | Fixed: catch-all sends an in-band `error` event |
+| 4 | "Key set" check ignored the SDK's other credential sources (`ANTHROPIC_AUTH_TOKEN`, `ant` profile) | Fixed: `credentials_available()` mirrors the SDK lookup |
+| 5 | Upload waited on a 90 s LLM call with 2 retries, up to ~5 min | Fixed: 45 s, no retries; heuristics take over |
+| 6 | SQLite foreign keys were never enabled, so `ON DELETE CASCADE` did nothing and orphan chat rows were possible | Fixed: `PRAGMA foreign_keys=ON` per connection |
+| 7 | A failed *regeneration* hid the saved summary behind partial text | Fixed: show the saved summary plus the error |
+| 8 | Markdown link renderer passed react-markdown's `node` prop to `<a>`, and the components map was rebuilt per delta | Fixed |
+| 9 | Chat auto-scroll yanked the user to the bottom while they reread history | Fixed: only follow when already at the bottom |
+
+**Takeaway:** the happy path worked on the first try. Every finding concerns
+*failure* paths (missing key, truncated output, concurrent delete), which a demo
+never exercises and which an SDK's exception hierarchy does not fully cover.
+

@@ -574,3 +574,163 @@ a.btn {
   gap: 0.5rem;
   margin-top: 0.6rem;
 }
+
+/* ---- LLM panels ---- */
+
+.panel {
+  margin-bottom: 1rem;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.panel-head h2 {
+  margin: 0;
+}
+
+.note {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.thinking {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.provenance {
+  font-size: 0.8rem;
+  margin: 0.5rem 0 0;
+}
+
+.markdown {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol {
+  margin: 0.5rem 0;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.4rem;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-size: 1rem;
+  margin: 0.9rem 0 0.3rem;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  font-size: 0.875rem;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.6rem;
+  text-align: left;
+}
+
+.markdown pre {
+  background: var(--surface-2);
+  padding: 0.6rem;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0.25rem 0.1rem 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.bubble {
+  border-radius: 10px;
+  padding: 0.6rem 0.85rem;
+  max-width: 92%;
+}
+
+.bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.bubble.user {
+  align-self: flex-end;
+  background: var(--accent-soft);
+}
+
+.bubble.assistant {
+  align-self: flex-start;
+  background: var(--surface-2);
+}
+
+.bubble.assistant .markdown p {
+  white-space: normal;
+}
+
+.suggestions {
+  margin-bottom: 0.6rem;
+}
+
+.suggestions .chip {
+  font-size: 0.8rem;
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ask-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.ask-form textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+@media (max-width: 600px) {
+  .ask-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .bubble {
+    max-width: 100%;
+  }
+}

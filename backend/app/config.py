@@ -3,6 +3,8 @@
 from functools import lru_cache
 from pathlib import Path
 
+from typing import Literal
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -36,6 +38,23 @@ class Settings(BaseSettings):
     # pool"; an API key raises the free daily quota.
     openalex_email: str | None = None
     openalex_api_key: str | None = None
+
+
+    # --- LLM (Anthropic Claude) ---
+    # Read from .env; if unset, the SDK falls back to its own credential lookup.
+    anthropic_api_key: str | None = None
+    anthropic_base_url: str | None = None
+    llm_model: str = "claude-opus-5"
+    # Thinking depth / cost. Claude Opus 5 is strong at "medium"; raise for harder questions.
+    llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    # Upper bound on thinking + answer tokens per response.
+    llm_max_tokens: int = 32000
+    # Paper text beyond this many characters (~4 chars per token) is cut off.
+    llm_max_paper_chars: int = 400_000
+    # Q&A turns of history sent with each new question.
+    llm_history_messages: int = 20
+    # Use the LLM to extract title/authors/year/abstract from uploaded PDFs.
+    llm_extract_metadata: bool = True
 
 
 @lru_cache

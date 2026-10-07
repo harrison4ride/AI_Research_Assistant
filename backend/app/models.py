@@ -2,8 +2,17 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text, TypeDecorator, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    TypeDecorator,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
 
@@ -61,8 +70,39 @@ class Paper(Base):
     full_text_status: Mapped[str | None] = mapped_column(String(20))
     full_text_error: Mapped[str | None] = mapped_column(Text)
 
+    # Latest LLM summary (F4).
+    summary: Mapped[str | None] = mapped_column(Text)
+    summary_model: Mapped[str | None] = mapped_column(String(100))
+    # "full_text" or "abstract": what the summary was based on.
+    summary_context: Mapped[str | None] = mapped_column(String(20))
+    summary_created_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        back_populates="paper",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.id",
+    )
 
     @property
     def has_pdf(self) -> bool:
         return self.pdf_path is not None
+
+
+class ChatMessage(Base):
+    """One turn of the Q&A conversation about a paper (F5)."""
+
+    __tablename__ = "chat_messages"
+    __table_args__ = ({"sqlite_autoincrement": True},)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(20))  # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(String(100))
+    # "full_text" or "abstract": what the answer was based on.
+    context: Mapped[str | None] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    paper: Mapped[Paper] = relationship(back_populates="messages")
