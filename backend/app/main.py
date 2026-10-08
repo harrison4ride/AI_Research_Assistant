@@ -1,10 +1,11 @@
 """FastAPI entry point for the AI Research Assistant backend."""
 
+import html
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import BACKEND_DIR, get_settings
@@ -43,7 +44,12 @@ def health() -> dict:
 # routing, so "/" is its only page; mounting just /assets (instead of a
 # catch-all at "/") leaves /api paths with FastAPI's normal JSON 404/405 handling.
 settings = get_settings()
-if settings.serve_frontend and (dist := settings.frontend_dist).is_dir():
+dist = settings.frontend_dist
+# A complete build has both; an interrupted build or a wrong FRONTEND_DIST falls
+# through to the explanation page below instead of crashing at startup.
+frontend_built = (dist / "index.html").is_file() and (dist / "assets").is_dir()
+
+if settings.serve_frontend and frontend_built:
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
@@ -55,3 +61,27 @@ if settings.serve_frontend and (dist := settings.frontend_dist).is_dir():
         return FileResponse(dist / "favicon.svg")
 
     app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+
+else:
+    # No UI on this port (development mode, or no usable build). Explain where
+    # the app is instead of answering "/" with a bare 404.
+    DEV_UI = "<a href='http://localhost:5173'>http://localhost:5173</a>"  # port set in frontend/vite.config.ts
+    if not settings.serve_frontend:
+        _hint = f"In development mode the app runs at {DEV_UI} (started by <code>make dev</code>)."
+    else:
+        _hint = (
+            f"No frontend build was found in <code>{html.escape(str(dist))}</code>. "
+            "Run <code>make build</code> (it builds into <code>frontend/dist</code>) and restart this "
+            "server, or check <code>FRONTEND_DIST</code> in <code>.env</code>. "
+            f"Alternatively, run <code>make dev</code> and open {DEV_UI}."
+        )
+
+    @app.get("/", include_in_schema=False)
+    def api_only_index() -> HTMLResponse:
+        return HTMLResponse(
+            "<!doctype html><meta charset='utf-8'><title>AI Research Assistant API</title>"
+            "<body style='font-family:system-ui;max-width:40rem;margin:3rem auto;line-height:1.5'>"
+            "<h1>AI Research Assistant: API server</h1>"
+            f"<p>This port serves only the API. {_hint}</p>"
+            "<p>API documentation: <a href='/docs'>/docs</a></p></body>"
+        )

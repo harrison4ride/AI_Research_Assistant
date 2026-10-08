@@ -310,3 +310,33 @@ happy-path test. The review then found problems on unusual inputs (Unicode,
 ligatures, nulls), under concurrency (delete mid-download, stale responses),
 on failure paths (missing key, truncated output), and in deployment details.
 
+
+## Fix: "The Page Won't Open" (User Report)
+
+**Report:** after running the setup script, the user could not open the app.
+
+**Diagnosis:** nothing was listening on ports 8000 or 5173, so the servers were
+not running. Starting `make dev` showed two more problems in headless Chrome:
+
+- Vite bound only the IPv6 loopback `[::1]:5173` (its default `localhost` host on
+  macOS), while the backend bound only IPv4 `127.0.0.1:8000`. So
+  <http://127.0.0.1:5173> was refused, even though <http://localhost:5173> worked.
+- In development mode, <http://localhost:8000> returned a bare JSON 404, which
+  looks like a broken app.
+
+**Fix:** Vite now binds `127.0.0.1`, like the backend, and port 8000 shows a page
+that explains where the app is. INSTALL.md gained two troubleshooting rows.
+
+**`/code-review high` findings (6) and resolution:**
+
+| # | Finding | Action |
+|---|---------|--------|
+| 1 | **Regression from this fix:** with Vite on `127.0.0.1`, `strictPort` no longer notices another program on `[::1]:5173`, and browsers would open *that* program at `localhost:5173` | Fixed: a Vite plugin probes `[::1]:5173` and refuses to start if it is taken (tested with a dummy listener) |
+| 2 | The "not built yet, run make start" hint was wrong when `FRONTEND_DIST` points elsewhere | Fixed: the hint names the checked directory and `FRONTEND_DIST` |
+| 3 | A `dist` folder without `index.html` or `assets/` crashed startup or returned 500 | Fixed: requires both; otherwise the hint page shows (tested with 4 bad folders) |
+| 4 | INSTALL.md row blamed development mode for every "API server" page | Fixed: covers both cases |
+| 5 | "Keep the terminal open... `make dev`" confused readers using two terminals | Fixed wording |
+| 6 | Dev URL markup duplicated | Fixed: one constant |
+
+**Takeaway:** the first fix for a networking bug introduced a subtler
+networking bug, and the review caught it before commit.

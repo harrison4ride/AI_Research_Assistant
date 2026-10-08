@@ -221,7 +221,10 @@ In the second, first `cd` into the project folder, then:
 (cd frontend && npm run dev)
 ```
 
-Open <http://localhost:5173>. The frontend forwards `/api` requests to the backend.
+Open <http://localhost:5173> (or <http://127.0.0.1:5173>). The frontend forwards
+`/api` requests to the backend. Keep the terminal (or both terminals) open: the page
+works only while the servers run. Port 8000 serves only the API in this mode, and
+its home page links back to 5173.
 
 ### Single Server
 
@@ -260,6 +263,8 @@ Open <http://localhost:8000>.
 | `uv sync` says "The lockfile at uv.lock needs to be updated" | `backend/pyproject.toml` was changed without updating the lockfile. Undo the change with `git checkout backend/pyproject.toml`, or run `uv lock` in `backend/`. |
 | `uv sync` says it is "Unable to find lockfile" or cannot parse it | Your uv is too old (before 0.4); run `uv self update` or `brew upgrade uv`. |
 | `npm ci` fails because `package.json` and `package-lock.json` are not in sync | One of them was edited; restore both with `git checkout frontend/package.json frontend/package-lock.json`. |
+| Browser says "This site can't be reached" or "connection refused" | The servers are not running. Run `make dev` (or `make start`), keep that terminal open, and reload. Check that the terminal printed `Local: http://127.0.0.1:5173/` (dev) or `Uvicorn running on http://127.0.0.1:8000` (single server). |
+| <http://localhost:8000> shows "API server" instead of the app | The page says which case applies. In development mode the app runs at <http://localhost:5173>. Otherwise no frontend build was found: run `make start` (or `make build`, then restart the backend), and check `FRONTEND_DIST` if you set it. |
 | "Address already in use" on port 8000, or Vite reports "Port 5173 is already in use" | Another process holds the port. Find it with `lsof -i :8000` (or `:5173`) and stop it. |
 | UI shows "Cannot reach the backend" | The backend is not running, or crashed at startup; check its terminal output. |
 | Paper page says no API key is configured | Set `ANTHROPIC_API_KEY` in `.env` and restart the backend. |
