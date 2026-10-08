@@ -39,7 +39,7 @@ three-column reader, without saving it first:
 
 Papers opened from search but not saved stay out of the library, keep their
 conversation if you save them later, and are deleted once they have not been opened
-for `CACHED_PAPER_DAYS` (default 30); the backend checks at startup and every 12 hours.
+for `CACHED_PAPER_DAYS` (default 7); the backend checks at startup and every 12 hours.
 
 Full text is always available for arXiv papers and uploads. Other papers download their
 open-access PDF when you open them. When no PDF can be found (common for paywalled

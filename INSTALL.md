@@ -168,7 +168,7 @@ the backend after changing `.env`.
 | `LLM_EXTRACT_METADATA` | `true` | Let Claude read an uploaded PDF's first pages for title, authors, year, and abstract |
 | `OPENALEX_EMAIL`, `OPENALEX_API_KEY` | none | Optional OpenAlex identification and quota (see above) |
 | `MAX_PDF_MB` | `50` | Size limit for uploaded and downloaded PDFs |
-| `CACHED_PAPER_DAYS` | `30` | Papers opened from search but never saved are deleted (with their PDF and chat) once they have not been opened for this many days; checked at startup and every 12 hours |
+| `CACHED_PAPER_DAYS` | `7` | Papers opened from search but never saved are deleted (with their PDF and chat) once they have not been opened for this many days; checked at startup and every 12 hours |
 | `DATA_DIR` | `backend/data` | Where the database and PDFs are stored; relative paths are resolved against `backend/` |
 | `SERVE_FRONTEND` | `true` | Whether the backend also serves the built UI; `make dev` sets it to `false` |
 | `FRONTEND_DIST` | `frontend/dist` | The built UI that the backend serves; relative paths are resolved against `backend/` |

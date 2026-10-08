@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     max_pdf_mb: int = Field(50, gt=0)
     # Papers opened from search but never saved are deleted after this many
     # days without being opened.
-    cached_paper_days: int = Field(30, ge=1)
+    cached_paper_days: int = Field(7, ge=1)
 
     # --- Paper search ---
     # Optional OpenAlex identification: an email puts requests in the "polite
