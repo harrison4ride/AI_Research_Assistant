@@ -1,9 +1,11 @@
-# Common tasks. Requires uv (Python) and npm (Node.js).
-.PHONY: install dev backend frontend build start
+# Common tasks. Requires uv (Python) and npm (Node.js); see INSTALL.md.
+.PHONY: install check dev backend frontend build start
 
-install:            ## Install backend and frontend dependencies
-	cd backend && uv sync
-	cd frontend && npm ci
+install:            ## Check requirements, install all packages, create .env
+	./scripts/setup.sh
+
+check:              ## Report which requirements are met; changes nothing
+	./scripts/setup.sh --check
 
 backend:            ## Run the API with auto-reload on :8000 (UI comes from `make frontend`)
 	cd backend && SERVE_FRONTEND=false uv run uvicorn app.main:app --reload --port 8000

@@ -79,27 +79,36 @@ AI_Research_Assistant/
 │       ├── components/        PaperCard, UploadBox, SummaryPanel, ChatPanel, …
 │       ├── api.ts             backend client, including the stream reader
 │       └── types.ts           shared types
+├── scripts/setup.sh           checks requirements and installs everything
 ├── docs/                      requirements, plan, development log
-├── Makefile, Dockerfile, .env.example
+├── INSTALL.md                 detailed installation guide
+├── Makefile, .env.example
 ```
 
 ## Setup
 
+Full requirements, version notes, and troubleshooting are in **[INSTALL.md](INSTALL.md)**.
+
 ### Prerequisites
 
-- **[uv](https://docs.astral.sh/uv/)** for Python. It downloads Python 3.11 automatically.
-- **Node.js 20 or newer** (tested with 22) and npm.
+- **[uv](https://docs.astral.sh/uv/)** for Python. It uses an installed Python 3.11 or
+  downloads one.
+- **Node.js 20.19+ (20.x) or 22.12+** (tested with 22.22) and npm.
 - **An Anthropic API key** from <https://console.anthropic.com/>. Search, the library,
   and PDF upload work without it; summaries and Q&A need it.
 
-### Install and Configure
+### Install
 
 ```bash
 git clone https://github.com/harrison4ride/AI_Research_Assistant.git
 cd AI_Research_Assistant
-make install                 # uv sync + npm install
-cp .env.example .env         # then set ANTHROPIC_API_KEY in .env
+./scripts/setup.sh
 ```
+
+The script checks the tools above, installs the locked Python and JavaScript
+packages inside the project folder, creates `.env` from `.env.example`, asks for
+your API key (hidden input; press Enter to skip), and confirms the backend loads.
+It is safe to run again. `./scripts/setup.sh --check` only reports what is installed.
 
 ### Run (Development)
 
@@ -108,9 +117,9 @@ make dev
 ```
 
 This starts the API on port 8000 and the UI on **<http://localhost:5173>** (open
-this one). The UI forwards `/api` calls to the
-backend. Both reload on code changes; Ctrl+C stops both. To run them in separate
-terminals, use `make backend` and `make frontend`.
+this one). The UI forwards `/api` calls to the backend. Both reload on code changes;
+Ctrl+C stops both. To run them in separate terminals, use `make backend` and
+`make frontend`.
 
 ### Run (Single Process)
 
@@ -119,37 +128,16 @@ make start
 ```
 
 This builds the frontend and serves the UI and the API together on
-**<http://localhost:8000>**.
-
-### Docker
-
-```bash
-docker build -t research-assistant .
-docker run -p 8000:8000 --env-file .env -e DATA_DIR=/data -v research-data:/data research-assistant
-```
-
-The image builds the frontend and runs the single-process server, keeping the
-database and PDFs in the `/data` volume. `-e DATA_DIR=/data` keeps a `DATA_DIR` line
-in your local `.env` from moving the data out of the volume. Unlike the app itself,
-Docker's `--env-file` does not strip quotes, so write `.env` values unquoted
-(`ANTHROPIC_API_KEY=sk-ant-...`). **Note:** this Dockerfile has not been built
-or run yet, because Docker was not available in the development environment.
-`make start` is the verified way to run the app as one process.
+**<http://localhost:8000>**. INSTALL.md lists the equivalent commands for machines
+without `make`.
 
 ## Configuration
 
-All settings are optional except the API key. Set them in `.env` (see `.env.example`).
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `ANTHROPIC_API_KEY` | none | Claude API key, needed for summaries, Q&A, and LLM metadata extraction |
-| `LLM_MODEL` | `claude-opus-5` | Claude model |
-| `LLM_EFFORT` | `medium` | Thinking effort: `low`, `medium`, `high`, `xhigh`, `max` |
-| `LLM_MAX_PAPER_CHARS` | `400000` | Paper text sent to the model (about 100K tokens) |
-| `LLM_EXTRACT_METADATA` | `true` | Let Claude read uploaded PDFs' first pages for metadata |
-| `OPENALEX_EMAIL`, `OPENALEX_API_KEY` | none | Optional OpenAlex identification and higher quota |
-| `MAX_PDF_MB` | `50` | Size limit for uploaded and downloaded PDFs |
-| `DATA_DIR` | `backend/data` | Location of the SQLite database and PDFs |
+Settings live in `.env` in the project root; `.env.example` lists every one. Only
+`ANTHROPIC_API_KEY` is needed. The others choose the model (`LLM_MODEL`, default
+`claude-opus-5`), its thinking effort (`LLM_EFFORT`, default `medium`), size limits,
+and where data is stored. See
+[INSTALL.md § Environment Variables](INSTALL.md#environment-variables) for the full table.
 
 ## API Reference
 

@@ -223,6 +223,76 @@ and a rerun confirmed both servers stop while the caller survives.
 (caching, signals, container configuration) rather than logic bugs. These problems
 appear only after deployment, which is why they are easy to miss.
 
+## M5 Follow-Up: Docker Removed, Setup Script and INSTALL.md
+
+**What happened:** in M5 the agent (Claude Code) added a Dockerfile as the
+"deployment config", although it had confirmed at the start of the session that
+Docker was **not installed**. The Dockerfile could never be built or tested; the
+README could only say "not verified", and 4 of the 10 M5 review findings were
+spent on it. The user challenged this and clarified that "configure deployment"
+means the libraries and environment the app needs. The Dockerfile,
+`.dockerignore`, and the README's Docker section (including the Docker caveats from
+M5 findings 1 and 5) were removed.
+
+**Built instead:** `scripts/setup.sh` and `INSTALL.md`.
+
+- The script checks uv and Node.js (the exact range Vite 8 accepts), runs
+  `uv sync --locked` and `npm ci`, creates `.env` with mode 600, checks every
+  `.env` value by loading the backend, and asks for the API key with hidden input.
+  `--check` reports without changing anything. It is written for macOS's bash 3.2.
+- `INSTALL.md` covers supported platforms, required tools with versions, every
+  locked package, all environment variables, network hosts, manual setup, running
+  without `make`, verification, troubleshooting, and uninstalling.
+
+**Agent mistakes during testing (test harness, not the app):** piping the API key
+into the script before the prompt appeared looked like a failed save, because
+`read -s` discards typed-ahead input by design; `expect` fixed the test. A blank exit
+code came from zsh lacking bash's `PIPESTATUS`.
+
+**Verification workflow:** four independent auditors (fact-check against code
+and lockfiles, script stress test, a newcomer following the guide literally at a
+path with spaces, and cross-document consistency), each followed by a skeptic that
+tried to refute every finding. 31 findings, 29 confirmed, 2 uncertain.
+
+| Confirmed problem | Fix |
+|-------------------|-----|
+| Code blocks had trailing `# comments`. macOS's interactive zsh does not treat `#` as a comment, so pasting failed, and in the Uninstall block the comment words became extra `rm -rf` arguments | No inline comments in any code block; explanations moved to prose |
+| `brew install node@22` (keg-only) does not put `node` on PATH, so setup kept failing | Recommend `brew install node` or nvm; explain `node@22` linking |
+| Troubleshooting blamed "lockfile needs updating" on an old uv; the real cause is an edited `pyproject.toml` (tested uv 0.3.5–0.11.17) | Split into two accurate rows |
+| Vite silently moved to port 5174 when 5173 was busy, so the documented URL reached another app | `strictPort: true`; Vite now fails with "Port 5173 is already in use" |
+| A broken `node`/`npm`/`uv` aborted the script under `set -e` or passed as "✓ npm " | Guarded version probes with clear messages |
+| Key detection hand-parsed `.env` and misread CRLF, `export`, spaces around `=`, and inline comments; the prompt could append a duplicate key line | Ask the app's own settings loader; save with `python-dotenv` (now a direct dependency) |
+| `--check` passed after an interrupted install or with an invalid `.env` value | `--check` loads the backend and runs `npm ls` |
+| An exported `CDPATH` corrupted the script's root path | `CDPATH='' cd ... >/dev/null` |
+| An unreadable `.env` asked for the key, then crashed and lost it | Check permissions first, with a clear message |
+| Run commands left the shell in `backend/` or `frontend/` | Subshells `(cd x && ...)`; "run from the project folder" |
+| Docs said uv always downloads Python; it uses an installed 3.11 first | Reworded |
+| Four settings (`LLM_MAX_TOKENS`, `LLM_HISTORY_MESSAGES`, `ANTHROPIC_BASE_URL`, `FRONTEND_DIST`) undocumented; a second `backend/.env` silently overrode the root `.env` | Documented all settings; `config.py` reads only the root `.env` |
+| Network host list was wrong for a firewall allow-list; uv/npm caches unmentioned; smaller wording errors | Corrected |
+
+**Uncertain, not changed:** an unreadable `.env` is unlikely in practice (now
+handled anyway), and `make dev` ignores a SIGINT sent only to make's PID (Ctrl+C
+in the terminal and SIGTERM both stop it; the docs say to use Ctrl+C).
+
+**`/code-review high` after the workflow fixes (9 more findings), all fixed:**
+
+| # | Finding | Fix |
+|---|---------|-----|
+| 1 | The script's key check ignored `ANTHROPIC_AUTH_TOKEN` and `ant` login profiles, which the app accepts | Reuse the app's `credentials_available()` |
+| 2 | An empty `ANTHROPIC_API_KEY` exported in the shell overrode `.env`, so a saved key was reported as "could not save" | `env_ignore_empty=True` in the settings |
+| 3 | A `backend/.env` from the old config would be silently ignored | Warning in the script and at backend startup |
+| 4 | `--check` claimed to change nothing but created `DATA_DIR` by importing the app | Validate only the settings; nothing is created |
+| 5 | Saving the key replaced a symlinked `.env` with a regular file | `follow_symlinks=True` |
+| 6 | After installing uv, only `~/.local/bin` was added to PATH | Also `$XDG_BIN_HOME` and `$UV_INSTALL_DIR` |
+| 7 | Numeric settings accepted nonsense (`LLM_HISTORY_MESSAGES=-1` sent the whole history) | Range constraints in `config.py` |
+| 8 | `--check` could not detect packages drifting from `uv.lock` | `uv sync --locked --check` |
+| 9 | Failures imported the app twice to print the error | Capture the output once |
+
+**Takeaway:** install documentation is easy to get *plausibly* wrong. Several
+errors (keg-only Homebrew formulas, zsh comment handling, Vite's port fallback,
+uv's Python preference) were only caught because the agents actually ran the
+steps instead of reading them.
+
 ## Summary Across Milestones
 
 | Milestone | Review findings | Fixed | Documented, not changed |
@@ -232,7 +302,8 @@ appear only after deployment, which is why they are easy to miss.
 | M2 Library | 10 | 10 | 0 |
 | M3 PDF upload | 10 | 10 | 0 |
 | M4 LLM | 9 | 9 | 0 |
-| M5 Deployment | 10 | 9 | 1 (Docker quoting, README) |
+| M5 Deployment | 10 | 9 | 1 (Docker quoting; Docker later removed) |
+| M5 follow-up (setup script) | 29 confirmed by workflow + 9 from `/code-review` | 38 | 0 |
 
 Recurring pattern: the first implementation of each milestone passed its
 happy-path test. The review then found problems on unusual inputs (Unicode,

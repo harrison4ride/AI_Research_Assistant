@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -12,9 +12,13 @@ REPO_ROOT = BACKEND_DIR.parent
 
 
 class Settings(BaseSettings):
+    # One settings file, in the repo root. Variables set in the shell take
+    # precedence, except empty ones (an empty exported ANTHROPIC_API_KEY must not
+    # hide the key in .env).
     model_config = SettingsConfigDict(
-        env_file=(REPO_ROOT / ".env", BACKEND_DIR / ".env"),
+        env_file=REPO_ROOT / ".env",
         env_file_encoding="utf-8",
+        env_ignore_empty=True,
         extra="ignore",
     )
 
@@ -26,7 +30,7 @@ class Settings(BaseSettings):
     frontend_dist: Path = REPO_ROOT / "frontend" / "dist"
     # Off in development, where Vite serves the live UI and dist/ may be stale.
     serve_frontend: bool = True
-    max_pdf_mb: int = 50
+    max_pdf_mb: int = Field(50, gt=0)
 
     # --- Paper search ---
     # Optional OpenAlex identification: an email puts requests in the "polite
@@ -42,11 +46,11 @@ class Settings(BaseSettings):
     # Thinking depth / cost. Claude Opus 5 is strong at "medium"; raise for harder questions.
     llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     # Upper bound on thinking + answer tokens per response.
-    llm_max_tokens: int = 32000
+    llm_max_tokens: int = Field(32000, gt=0, le=128000)
     # Paper text beyond this many characters (~4 chars per token) is cut off.
-    llm_max_paper_chars: int = 400_000
+    llm_max_paper_chars: int = Field(400_000, gt=0)
     # Q&A turns of history sent with each new question.
-    llm_history_messages: int = 20
+    llm_history_messages: int = Field(20, ge=0)
     # Use the LLM to extract title/authors/year/abstract from uploaded PDFs.
     llm_extract_metadata: bool = True
 

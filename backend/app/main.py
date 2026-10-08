@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import get_settings
+from .config import BACKEND_DIR, get_settings
 from .db import init_db
 from .routers import assistant, papers, search
 from .services.http import close_client
@@ -19,6 +19,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(m
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if (BACKEND_DIR / ".env").exists():
+        logging.getLogger(__name__).warning(
+            "backend/.env is not read; move its settings into .env in the project root."
+        )
     init_db()
     yield
     await close_client()

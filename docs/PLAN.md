@@ -38,6 +38,9 @@
 - **Secrets:** read from `.env` (git-ignored); `.env.example` documents the variables.
 - **Deployment:** `npm run build` produces static assets that FastAPI serves, so the
   whole app runs as one process on one port.
+- **Environment setup:** `scripts/setup.sh` checks the required tools (uv, Node.js),
+  installs the locked packages, and creates `.env`; `INSTALL.md` documents every
+  requirement. A Dockerfile was tried in M5 and removed (see DEVLOG).
 
 ## Milestones
 
@@ -51,4 +54,4 @@ fix findings → commit. Review outcomes are logged in `docs/DEVLOG.md`.
 | M2 | SQLite library: paper model, save / list / get / delete endpoints, library UI, de-duplication | F2 |
 | M3 | PDF upload + processing: upload endpoint, PDF storage, text + metadata extraction, full-text fetch for saved search papers, editable metadata | F3 |
 | M4 | LLM: Claude integration, streamed summary, streamed Q&A chat with persisted history, LLM-assisted metadata extraction | F4, F5 |
-| M5 | README, single-process production build, deployment config, end-to-end verification | submission |
+| M5 | README, INSTALL.md + setup script, single-process production build, end-to-end verification | submission |
