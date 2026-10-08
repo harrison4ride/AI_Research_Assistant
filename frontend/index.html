@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Images only from this app: model output can never make the browser fetch another site. -->
+    <meta http-equiv="Content-Security-Policy" content="img-src 'self' data: blob:" />
     <title>AI Research Assistant</title>
   </head>
   <body>

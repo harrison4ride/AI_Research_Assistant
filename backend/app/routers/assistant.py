@@ -31,7 +31,8 @@ from ..services.llm import (
     PaperContext,
     StreamResult,
     build_context,
-    credentials_available,
+    llm_status,
+    model_label,
     stream_reply,
 )
 from .papers import get_paper_or_404
@@ -99,8 +100,14 @@ async def _stream_and_save(
 
 
 @router.get("/config", response_model=AppConfig)
-def app_config() -> AppConfig:
-    return AppConfig(llm_model=get_settings().llm_model, llm_key_set=credentials_available())
+async def app_config() -> AppConfig:
+    ready, hint = await llm_status()
+    return AppConfig(
+        llm_provider=get_settings().llm_provider,
+        llm_model=model_label(),
+        llm_ready=ready,
+        llm_hint=hint,
+    )
 
 
 @router.post("/papers/{paper_id}/summary")

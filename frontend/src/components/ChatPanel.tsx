@@ -2,8 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type Keyb
 import { clearChat, errorMessage, getChat, streamAnswer } from '../api'
 import { useLlmStream } from '../useLlmStream'
 import type { AppConfig, ChatMessage } from '../types'
-import LlmKeyNotice from './LlmKeyNotice'
+import LlmNotice from './LlmNotice'
 import Markdown from './Markdown'
+import RichText from './RichText'
 
 // Example questions from the assignment; one click asks them.
 const SUGGESTIONS = [
@@ -86,7 +87,7 @@ export default function ChatPanel({ paperId, llm }: Props) {
     }
   }
 
-  const disabled = llm?.llm_key_set === false
+  const disabled = llm?.llm_ready === false
   const hasHistory = (messages?.length ?? 0) > 0
   return (
     <section className="card panel">
@@ -99,7 +100,7 @@ export default function ChatPanel({ paperId, llm }: Props) {
         )}
       </div>
 
-      {disabled && <LlmKeyNotice />}
+      {llm && disabled && <LlmNotice llm={llm} />}
       {loadError && <div className="alert error">{loadError}</div>}
 
       {(hasHistory || pending) && (
@@ -129,7 +130,11 @@ export default function ChatPanel({ paperId, llm }: Props) {
         </div>
       )}
 
-      {stream.error && <div className="alert error">{stream.error}</div>}
+      {stream.error && (
+        <div className="alert error">
+          <RichText text={stream.error} />
+        </div>
+      )}
 
       <div className="chips suggestions">
         {SUGGESTIONS.map((q) => (

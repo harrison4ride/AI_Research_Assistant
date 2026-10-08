@@ -10,7 +10,8 @@
    ├── search service ──► arXiv API, OpenAlex API        (F1)
    ├── library (SQLAlchemy) ──► SQLite  data/app.db      (F2)
    ├── PDF service (PyMuPDF) ──► data/pdfs/*.pdf         (F3)
-   └── LLM service ──► Anthropic Claude API               (F4, F5)
+   └── LLM service ──► local Claude Code CLI (default)    (F4, F5)
+                       or Anthropic Claude API
 ```
 
 ### Key design decisions
@@ -27,12 +28,14 @@
 - **Metadata extraction from uploads (F3):** an arXiv-ID lookup → LLM
   extraction from the first pages → font-size/regex heuristics, in that order of
   preference; the user can edit fields afterwards.
-- **LLM:** Claude (`claude-opus-5` by default, set by `LLM_MODEL`) through the
-  official `anthropic` SDK, with streaming, adaptive thinking, and server-side
-  refusal fallbacks. The paper sits in the system prompt behind a prompt-cache
+- **LLM:** two providers. The default, `LLM_PROVIDER=claude-code`, runs the locally
+  installed Claude Code CLI with the user's own login (no API key), locked down to
+  answering from the paper (no tools, MCP, settings, or saved sessions). `LLM_PROVIDER=api` uses Claude (`claude-opus-5` by default, set by
+  `LLM_MODEL`) through the official `anthropic` SDK, with streaming, adaptive
+  thinking, and server-side refusal fallbacks. The paper sits in the system prompt behind a prompt-cache
   breakpoint, so the summary and every follow-up question reuse it. An
-  OpenAI-compatible provider was planned at first, but was dropped to keep a
-  single, well-supported integration.
+  OpenAI-compatible provider was planned at first but dropped; both providers reach
+  Claude.
 - **Persistence:** SQLite file under `backend/data/` (git-ignored). Summaries and
   Q&A history are stored too, so they survive restarts.
 - **Secrets:** read from `.env` (git-ignored); `.env.example` documents the variables.

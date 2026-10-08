@@ -7,8 +7,9 @@
 #
 # Steps: check uv and Node.js; install Python 3.11 and the backend packages
 # (backend/.venv); install the frontend packages (frontend/node_modules);
-# create .env from .env.example and validate its values; optionally store your
-# Anthropic API key. Safe to re-run: an existing .env is never replaced.
+# create .env from .env.example and validate its values; check the language
+# model: the local Claude Code login (default), or an Anthropic API key, which
+# it can store for you. Safe to re-run: an existing .env is never replaced.
 #
 # Written for bash 3.2, the version macOS ships.
 
@@ -85,6 +86,20 @@ settings_valid() {
   # setting name and its allowed values are what remains.
   SETTINGS_ERROR="$(printf '%s\n' "$out" | grep -v -e 'errors.pydantic.dev' -e '^[[:space:]^~]*$' | tail -n 3 | sed 's/^/    /')"
   return 1
+}
+
+# Ask the app which LLM provider is configured and whether it is ready.
+# Sets LLM_PROVIDER, LLM_LABEL, LLM_READY (yes/no) and LLM_HINT.
+llm_status() {
+  local info
+  info="$(backend_python -c '
+import asyncio
+from app.config import get_settings
+from app.services.llm import llm_status, model_label
+ready, hint = asyncio.run(llm_status())
+print("\t".join([get_settings().llm_provider, model_label(), "yes" if ready else "no", hint or ""]))
+' 2>/dev/null)" || info=''
+  IFS=$'\t' read -r LLM_PROVIDER LLM_LABEL LLM_READY LLM_HINT <<<"$info" || true
 }
 
 # True if the app will find Anthropic credentials: a key in .env or the shell,
@@ -188,10 +203,11 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
       printf '%s\n' "$SETTINGS_ERROR"
       missing=1
     fi
-    if credentials_found; then
-      ok "Anthropic credentials found"
+    llm_status
+    if [ "$LLM_READY" = "yes" ]; then
+      ok "Summaries and Q&A ready: $LLM_LABEL"
     else
-      warn "ANTHROPIC_API_KEY is not set: search, library, and upload work; summaries and Q&A stay disabled"
+      warn "Summaries and Q&A unavailable (search, library, and upload still work). ${LLM_HINT:-Could not check the language model.}"
     fi
   fi
   echo
@@ -241,18 +257,26 @@ else
   exit 1
 fi
 
-step "5. Anthropic API key"
-if credentials_found; then
-  ok "Anthropic credentials found"
-else
+step "5. Language model (summaries and Q&A)"
+llm_status
+if [ "$LLM_PROVIDER" = "claude-code" ]; then
+  # Default provider: the local Claude Code CLI with your own login; no API key.
+  if [ "$LLM_READY" = "yes" ]; then
+    ok "Using $LLM_LABEL with your Claude Code login (no API key needed)"
+  else
+    warn "${LLM_HINT:-Could not check Claude Code.} Search, library, and upload work without it."
+  fi
+elif [ "$LLM_PROVIDER" = "api" ] && credentials_found; then
+  ok "Using the Anthropic API ($LLM_LABEL); credentials found"
+elif [ "$LLM_PROVIDER" = "api" ]; then
   api_key=''
   if [ "$PROMPT" -eq 1 ]; then
-    echo "  Summaries and Q&A need an Anthropic API key (https://console.anthropic.com/)."
+    echo "  LLM_PROVIDER=api needs an Anthropic API key (https://console.anthropic.com/)."
     read -r -s -p "  Paste your key, or press Enter to skip: " api_key || api_key=''
     echo
   fi
   if [ -z "$api_key" ]; then
-    warn "No API key set. Search, library, and upload work; to enable summaries and Q&A, set ANTHROPIC_API_KEY in .env later."
+    warn "No API key set. Search, library, and upload work; to enable summaries and Q&A, set ANTHROPIC_API_KEY in .env, or use LLM_PROVIDER=claude-code."
   elif ! printf '%s' "$api_key" | grep -Eq '^[A-Za-z0-9_-]+$'; then
     warn "That doesn't look like an API key (expected letters, digits, - and _). Nothing was saved; edit .env by hand."
   else
@@ -272,6 +296,8 @@ PY
       exit 1
     fi
   fi
+else
+  warn "Could not determine the language model setup; check LLM_PROVIDER in .env."
 fi
 
 cat <<EOF

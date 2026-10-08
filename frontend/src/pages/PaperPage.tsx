@@ -14,11 +14,33 @@ export default function PaperPage({ id }: { id: number }) {
   const [llm, setLlm] = useState<AppConfig | null>(null)
 
   useEffect(() => {
-    getConfig()
-      .then(setLlm)
-      .catch(() => {
-        // Unknown: let the LLM requests themselves report problems.
-      })
+    let latest = 0
+    let lastLoad = 0
+    let ready = true
+    const load = () => {
+      const id = ++latest
+      lastLoad = Date.now()
+      getConfig()
+        .then((config) => {
+          if (id !== latest) return // a newer check already answered
+          ready = config.llm_ready
+          setLlm(config)
+        })
+        .catch(() => {
+          // Unknown: let the LLM requests themselves report problems.
+        })
+    }
+    // While the LLM is unavailable, recheck when the user returns to the tab
+    // (e.g. after `claude auth login`), at most once every 5 seconds.
+    const onFocus = () => {
+      if (!ready && Date.now() - lastLoad > 5000) load()
+    }
+    load()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      latest = -1 // ignore responses that arrive after unmount
+      window.removeEventListener('focus', onFocus)
+    }
   }, [])
 
   useEffect(() => {

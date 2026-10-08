@@ -3,7 +3,9 @@
 A web app for finding, organizing, and understanding research papers. You can search
 arXiv and OpenAlex, save papers to a local library, upload your own PDFs, and ask
 Claude to summarize a paper or answer questions about it. The answers are based on the
-paper's full text, not just its title and abstract.
+paper's full text, not just its title and abstract. By default Claude runs through the
+Claude Code installed on your machine, with your own Claude Code login, so no API key
+is needed.
 
 Built for Homework 1, "Build an AI Research Assistant with a Coding Agent", with
 Claude Code as the coding agent. The development record, including every
@@ -34,7 +36,8 @@ paywalled OpenAlex results), the app says so, falls back to the abstract, and of
     ├── Search ─────────► arXiv API (Atom XML), OpenAlex API (JSON)
     ├── Library ────────► SQLite via SQLAlchemy      backend/data/app.db
     ├── PDF processing ─► PyMuPDF                    backend/data/pdfs/
-    └── Assistant ──────► Anthropic Claude API (claude-opus-5 by default)
+    └── Assistant ──────► local Claude Code CLI (default, your login)
+                          or Anthropic Claude API (LLM_PROVIDER=api)
 ```
 
 Design choices worth knowing:
@@ -46,9 +49,14 @@ Design choices worth knowing:
 - **Streaming with a clean save.** Summaries and answers stream token by token, but
   are written to the database only after the full response arrives, so a failed or
   refused request never stores partial text.
-- **Server-side refusal fallback.** Requests opt into Anthropic's `fallbacks: "default"`
-  beta, so if the model's safety classifiers decline a request, the API retries it on a
-  fallback model automatically.
+- **Two ways to reach Claude.** `LLM_PROVIDER=claude-code` (default) runs the local
+  `claude` CLI locked down to answering from the paper: no tools, no MCP servers, no
+  CLAUDE.md or settings, no saved sessions, prompts passed verbatim, and the paper in
+  a file instead of on the command line. (Claude Code still adds your account email
+  and basic environment details to its context; the model is told never to repeat
+  them, and the UI never loads images from model output.) `LLM_PROVIDER=api` calls the Anthropic API and opts
+  into its `fallbacks: "default"` beta, so a request declined by the safety
+  classifiers is retried on a fallback model automatically.
 - **No secrets in git.** Keys live in `.env`, which is git-ignored. `.env.example`
   documents every setting.
 
@@ -70,7 +78,8 @@ AI_Research_Assistant/
 │   │       ├── arxiv.py, openalex.py   search clients
 │   │       ├── pdf.py                  text and metadata extraction
 │   │       ├── fulltext.py             PDF download, storage, attach
-│   │       └── llm.py                  Claude prompts and streaming
+│   │       ├── llm.py                  Claude prompts, streaming, provider choice
+│   │       └── claude_code.py          runs the local Claude Code CLI
 │   ├── pyproject.toml, uv.lock
 │   └── data/                  created at runtime; git-ignored
 ├── frontend/
@@ -94,8 +103,9 @@ Full requirements, version notes, and troubleshooting are in **[INSTALL.md](INST
 - **[uv](https://docs.astral.sh/uv/)** for Python. It uses an installed Python 3.11 or
   downloads one.
 - **Node.js 20.19+ (20.x) or 22.12+** (tested with 22.22) and npm.
-- **An Anthropic API key** from <https://console.anthropic.com/>. Search, the library,
-  and PDF upload work without it; summaries and Q&A need it.
+- **For summaries and Q&A:** [Claude Code](https://claude.com/claude-code), installed
+  and logged in (the default), or an Anthropic API key with `LLM_PROVIDER=api`. Search,
+  the library, and PDF upload work without either.
 
 ### Install
 
@@ -106,8 +116,9 @@ cd AI_Research_Assistant
 ```
 
 The script checks the tools above, installs the locked Python and JavaScript
-packages inside the project folder, creates `.env` from `.env.example`, asks for
-your API key (hidden input; press Enter to skip), and confirms the backend loads.
+packages inside the project folder, creates and validates `.env`, and checks that
+Claude Code is installed and logged in. (With `LLM_PROVIDER=api` it asks for your API
+key instead, with hidden input.)
 It is safe to run again. `./scripts/setup.sh --check` only reports what is installed.
 
 ### Run (Development)
@@ -133,10 +144,11 @@ without `make`.
 
 ## Configuration
 
-Settings live in `.env` in the project root; `.env.example` lists every one. Only
-`ANTHROPIC_API_KEY` is needed. The others choose the model (`LLM_MODEL`, default
-`claude-opus-5`), its thinking effort (`LLM_EFFORT`, default `medium`), size limits,
-and where data is stored. See
+Settings live in `.env` in the project root; `.env.example` lists every one. None is
+required with the default Claude Code provider. The main ones choose the provider
+(`LLM_PROVIDER`, default `claude-code`), the model (`CLAUDE_CODE_MODEL`, default `opus`;
+or `LLM_MODEL` with the API), its thinking effort (`LLM_EFFORT`, default `medium`), size
+limits, and where data is stored. See
 [INSTALL.md § Environment Variables](INSTALL.md#environment-variables) for the full table.
 
 ## API Reference
@@ -153,7 +165,7 @@ and where data is stored. See
 | `GET /api/papers/{id}/pdf` | View the stored PDF |
 | `POST /api/papers/{id}/summary` | Stream a new summary (NDJSON) |
 | `GET / POST / DELETE /api/papers/{id}/chat` | Read, ask (streams NDJSON), or clear the Q&A history |
-| `GET /api/config` | Model name and whether credentials were found |
+| `GET /api/config` | LLM provider and model, whether summaries and Q&A can run, and how to fix it if not |
 
 Interactive API docs are at <http://localhost:8000/docs> while the backend runs.
 
@@ -163,7 +175,8 @@ Interactive API docs are at <http://localhost:8000/docs> while the backend runs.
 - Search queries go to arXiv or OpenAlex. PDFs are downloaded from the links those
   services provide.
 - When you ask for a summary or an answer, the paper's text and your question go to
-  the Anthropic API. On upload, the first pages also go to Anthropic for metadata
+  Anthropic: through your Claude Code login by default, or the Anthropic API with
+  `LLM_PROVIDER=api`. On upload, the first pages also go to Anthropic for metadata
   extraction, unless `LLM_EXTRACT_METADATA=false`.
 
 ## Known Limitations

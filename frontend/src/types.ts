@@ -52,8 +52,10 @@ export interface ChatMessage {
 }
 
 export interface AppConfig {
-  llm_model: string
-  llm_key_set: boolean
+  llm_provider: 'claude-code' | 'api'
+  llm_model: string // human-readable label, e.g. "Claude Code (opus)"
+  llm_ready: boolean // whether summaries and Q&A can run
+  llm_hint: string | null // how to fix it when not ready
 }
 
 // Events streamed (as newline-delimited JSON) by the summary and chat endpoints.

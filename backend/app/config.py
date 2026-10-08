@@ -38,12 +38,21 @@ class Settings(BaseSettings):
     openalex_email: str | None = None
     openalex_api_key: str | None = None
 
-    # --- LLM (Anthropic Claude) ---
-    # Read from .env; if unset, the SDK falls back to its own credential lookup.
+    # --- LLM ---
+    # "claude-code": the locally installed Claude Code CLI with the user's own
+    # login (no API key). "api": the Anthropic API with ANTHROPIC_API_KEY.
+    llm_provider: Literal["claude-code", "api"] = "claude-code"
+    # Claude Code model alias or full name; "default" uses Claude Code's own default.
+    claude_code_model: str = "opus"
+    # Path to the `claude` executable; found on PATH when unset.
+    claude_code_path: str | None = None
+
+    # Anthropic API settings (LLM_PROVIDER=api). If no key is set, the SDK falls
+    # back to its own credential lookup.
     anthropic_api_key: str | None = None
     anthropic_base_url: str | None = None
     llm_model: str = "claude-opus-5"
-    # Thinking depth / cost. Claude Opus 5 is strong at "medium"; raise for harder questions.
+    # Thinking depth / cost, for both providers. Opus is strong at "medium"; raise for harder questions.
     llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     # Upper bound on thinking + answer tokens per response.
     llm_max_tokens: int = Field(32000, gt=0, le=128000)
@@ -63,6 +72,15 @@ class Settings(BaseSettings):
     def _anchor_relative_paths(cls, value: Path) -> Path:
         # Resolve relative paths against backend/, so they don't depend on the launch directory.
         return value if value.is_absolute() else (BACKEND_DIR / value).resolve()
+
+    @field_validator("claude_code_path")
+    @classmethod
+    def _anchor_cli_path(cls, value: str | None) -> str | None:
+        # A relative file path (with a slash) is anchored like the paths above;
+        # a bare command name is left for a PATH lookup.
+        if value and "/" in value and not Path(value).expanduser().is_absolute():
+            return str((BACKEND_DIR / value).resolve())
+        return value
 
 
 @lru_cache

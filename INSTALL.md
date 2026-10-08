@@ -37,6 +37,7 @@ missing.
 | npm | Comes with Node.js (tested with 10.9.4) | Installs the frontend packages | Included with Node.js | `npm --version` |
 | git | Any | Cloning the repository | `xcode-select --install` (macOS) or `sudo apt install git` | `git --version` |
 | make | Any (optional) | The `make dev` / `make start` shortcuts | `xcode-select --install` (macOS) or `sudo apt install make` | `make --version` |
+| [Claude Code](https://claude.com/claude-code) | 2.1.248 or later (tested with 2.1.293), logged in | Summaries and Q&A by default, through your own Claude Code login. Not needed with `LLM_PROVIDER=api`. | `npm install -g @anthropic-ai/claude-code`, or see the [setup guide](https://code.claude.com/docs/en/setup); then run `claude` once and log in | `claude --version`, then `claude auth status` |
 
 The Node.js range comes from Vite 8, which requires `^20.19.0 || >=22.12.0`.
 Node.js 21 and Node.js 22.0 to 22.11 are not supported. With Homebrew, prefer
@@ -52,16 +53,46 @@ You do **not** need to install these separately:
   database is a single file, `backend/data/app.db`, created on first start.
 - **PDF libraries.** PyMuPDF ships prebuilt wheels that include everything it needs.
 
-## Accounts and API Keys
+## Language Model Access
 
-| Key | Required? | What it enables | Where to get it |
-|-----|-----------|-----------------|-----------------|
-| `ANTHROPIC_API_KEY` | Required for summaries and Q&A | Paper summaries (F4), questions about a paper (F5), and reading metadata from uploaded PDFs | <https://console.anthropic.com/> (API usage is billed by Anthropic) |
-| `OPENALEX_EMAIL` | Optional | Puts OpenAlex searches in its "polite pool" | Any email address you own |
-| `OPENALEX_API_KEY` | Optional | Raises OpenAlex's free daily quota | <https://openalex.org/settings/api> |
+Summaries, Q&A, and reading metadata from uploaded PDFs need Claude. The app has
+two ways to reach it, chosen with `LLM_PROVIDER` in `.env`:
 
-Without an Anthropic key, search, the library, and PDF upload still work. The paper
-page then shows a notice and disables the Summary and Q&A buttons.
+| `LLM_PROVIDER` | What it uses | What you need |
+|----------------|--------------|---------------|
+| `claude-code` (default) | The Claude Code CLI installed on this machine, with your own Claude Code login (for example a Claude Pro or Max subscription). No API key. | Claude Code installed and logged in (`claude auth status` says `"loggedIn": true`) |
+| `api` | The Anthropic API | `ANTHROPIC_API_KEY` from <https://console.anthropic.com/> (usage is billed by Anthropic) |
+
+In Claude Code mode the app runs `claude` locked down to answering from the paper:
+it disables all tools, MCP servers, CLAUDE.md files, settings, hooks, and saved
+sessions, and passes your questions verbatim. One thing cannot be switched off:
+Claude Code adds a short context block with your account email, the working
+directory, OS, shell, and the date. The prompts tell the model never to repeat
+these details, and the app never loads images from model output, so an answer
+cannot send them anywhere by itself.
+
+The app removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the environment
+it gives Claude Code, so an API key exported in your shell cannot replace your
+login. Other Claude Code variables you export (for example `ANTHROPIC_PROFILE` or
+`CLAUDE_CODE_USE_BEDROCK`) still apply, as they do in your terminal. The model is
+`opus` unless you set `CLAUDE_CODE_MODEL`; summaries and answers count toward your
+Claude Code usage limits.
+
+This mode is meant for running the app yourself with your own login. Anthropic's
+Claude Code documentation says: "Unless previously approved, Anthropic does not allow
+third party developers to offer claude.ai login or rate limits for their products,
+including agents built on the Claude Agent SDK." If you share the app with other
+people, use `LLM_PROVIDER=api` with an API key.
+
+Without either, search, the library, and PDF upload still work. The paper page then
+shows what is missing and disables the Summary and Q&A buttons.
+
+Optional keys for paper search:
+
+| Key | What it enables | Where to get it |
+|-----|-----------------|-----------------|
+| `OPENALEX_EMAIL` | Puts OpenAlex searches in its "polite pool" | Any email address you own |
+| `OPENALEX_API_KEY` | Raises OpenAlex's free daily quota | <https://openalex.org/settings/api> |
 
 ## What Gets Installed
 
@@ -111,7 +142,7 @@ Exact versions are locked in `frontend/package-lock.json`; `npm ci` installs exa
 ## Environment Variables
 
 Settings live in one `.env` file in the project root. The setup script creates it
-from `.env.example` with owner-only permissions, because it holds your API key.
+from `.env.example` with owner-only permissions, because it can hold your API key.
 `.env` is git-ignored; never commit it. A variable set in your shell overrides the
 same variable in `.env`, unless the shell variable is empty. Earlier versions also
 read `backend/.env`; that file is now ignored, and the app warns if it exists.
@@ -121,11 +152,14 @@ the backend after changing `.env`.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ANTHROPIC_API_KEY` | none | Claude API key (see above) |
-| `ANTHROPIC_BASE_URL` | Anthropic API | Alternative API endpoint, such as a proxy |
-| `LLM_MODEL` | `claude-opus-5` | Claude model used for summaries, answers, and metadata |
-| `LLM_EFFORT` | `medium` | How much the model thinks: `low`, `medium`, `high`, `xhigh`, `max` |
-| `LLM_MAX_TOKENS` | `32000` | Upper limit on thinking plus answer tokens per response |
+| `LLM_PROVIDER` | `claude-code` | `claude-code` (local Claude Code login) or `api` (Anthropic API key); see above |
+| `CLAUDE_CODE_MODEL` | `opus` | Claude Code model alias or name; `default` uses Claude Code's own default |
+| `CLAUDE_CODE_PATH` | found on PATH | Path to the `claude` command |
+| `ANTHROPIC_API_KEY` | none | Anthropic API key (`api` only) |
+| `ANTHROPIC_BASE_URL` | Anthropic API | Alternative API endpoint, such as a proxy (`api` only) |
+| `LLM_MODEL` | `claude-opus-5` | Claude model (`api` only) |
+| `LLM_EFFORT` | `medium` | How much the model thinks, for both providers: `low`, `medium`, `high`, `xhigh`, `max` |
+| `LLM_MAX_TOKENS` | `32000` | Upper limit on thinking plus answer tokens per response (`api` only) |
 | `LLM_MAX_PAPER_CHARS` | `400000` | Paper text sent to the model, about 100K tokens; longer papers are cut off |
 | `LLM_HISTORY_MESSAGES` | `20` | Earlier Q&A messages sent with each new question |
 | `LLM_EXTRACT_METADATA` | `true` | Let Claude read an uploaded PDF's first pages for title, authors, year, and abstract |
@@ -149,7 +183,7 @@ and, in development, port **5173** (frontend).
 |------|----------|
 | `export.arxiv.org`, `arxiv.org` | arXiv search, metadata lookup, PDF downloads |
 | `api.openalex.org` | OpenAlex search |
-| `api.anthropic.com` | Summaries, answers, PDF metadata extraction |
+| `api.anthropic.com` (and Claude Code's own Anthropic endpoints) | Summaries, answers, PDF metadata extraction, with either provider |
 | Publisher and repository sites | Open-access PDFs linked from OpenAlex results |
 | `registry.npmjs.org` | JavaScript packages (setup only) |
 | `files.pythonhosted.org` | Python packages (setup only) |
@@ -160,8 +194,8 @@ and, in development, port **5173** (frontend).
 
 | Command | What it does |
 |---------|--------------|
-| `./scripts/setup.sh` | Checks the tools, installs the packages, creates and checks `.env`, and asks for the API key |
-| `./scripts/setup.sh --check` | Only reports whether the packages match the lockfiles, `.env` is valid, and credentials are found; changes nothing |
+| `./scripts/setup.sh` | Checks the tools, installs the packages, creates and checks `.env`, and checks the language model (the Claude Code login by default; with `LLM_PROVIDER=api` it asks for an API key if none is found) |
+| `./scripts/setup.sh --check` | Only reports whether the packages match the lockfiles, `.env` is valid, and summaries and Q&A can run; changes nothing |
 | `./scripts/setup.sh --no-prompt` | Same as the first, but never asks questions (for automation) |
 | `make install` | Same as `./scripts/setup.sh` |
 | `make check` | Same as `./scripts/setup.sh --check` |
@@ -177,10 +211,13 @@ What the full run does, in order:
    `frontend/node_modules`.
 4. Creates `.env` from `.env.example` if it does not exist (an existing `.env` is
    never replaced), then validates every value with the app's own settings loader.
-5. If the app would find no Anthropic credentials (an API key in `.env` or the shell,
-   `ANTHROPIC_AUTH_TOKEN`, or an `ant auth login` profile), asks for a key with hidden
-   input (press Enter to skip) and saves it to `.env`. Only the key's format is
-   checked, not whether Anthropic accepts it; the first summary shows that.
+5. Checks the language model. With `LLM_PROVIDER=claude-code` (the default), it
+   checks that `claude` is installed and logged in, and tells you how to fix it if not;
+   it never asks for an API key. With `LLM_PROVIDER=api`, if the app would find no
+   Anthropic credentials (an API key in `.env` or the shell, `ANTHROPIC_AUTH_TOKEN`, or
+   an `ant auth login` profile), it asks for a key with hidden input (press Enter to
+   skip) and saves it to `.env`. Only the key's format is checked, not whether
+   Anthropic accepts it; the first summary shows that.
 
 The script is safe to run again, for example after pulling new changes.
 
@@ -195,7 +232,9 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Then open `.env` in an editor and set `ANTHROPIC_API_KEY`.
+With the default `LLM_PROVIDER=claude-code`, make sure `claude auth status` reports
+`"loggedIn": true`. With `LLM_PROVIDER=api`, open `.env` in an editor and set
+`ANTHROPIC_API_KEY`.
 
 ## Running the App
 
@@ -250,8 +289,8 @@ Open <http://localhost:8000>.
    `{"status":"ok"}`.
 3. In the UI, search for "attention is all you need". Results should appear within a
    few seconds.
-4. Save a paper, open it, and click **Generate summary**. If the API key is missing
-   or wrong, the panel says so.
+4. Save a paper, open it, and click **Generate summary**. If Claude Code is missing
+   or logged out (or, in `api` mode, the key is missing or wrong), the panel says so.
 
 ## Troubleshooting
 
@@ -267,8 +306,13 @@ Open <http://localhost:8000>.
 | <http://localhost:8000> shows "API server" instead of the app | The page says which case applies. In development mode the app runs at <http://localhost:5173>. Otherwise no frontend build was found: run `make start` (or `make build`, then restart the backend), and check `FRONTEND_DIST` if you set it. |
 | "Address already in use" on port 8000, or Vite reports "Port 5173 is already in use" | Another process holds the port. Find it with `lsof -i :8000` (or `:5173`) and stop it. |
 | UI shows "Cannot reach the backend" | The backend is not running, or crashed at startup; check its terminal output. |
-| Paper page says no API key is configured | Set `ANTHROPIC_API_KEY` in `.env` and restart the backend. |
-| Summary fails with "API key is missing or invalid" | The key is wrong or revoked; create a new one in the Anthropic Console and update `.env`. |
+| Paper page says Claude Code was not found | Install Claude Code, or set `CLAUDE_CODE_PATH` to the `claude` command and restart the backend. Or switch to `LLM_PROVIDER=api`. |
+| Paper page says `CLAUDE_CODE_PATH` is not an executable file | Fix or remove `CLAUDE_CODE_PATH` in `.env` and restart the backend. |
+| Paper page says Claude Code is not logged in | Run `claude auth login` in a terminal, then switch back to the browser tab: the page rechecks when you return (at most every few seconds). |
+| Paper page says Claude Code is too old, or a summary fails with "unknown option" | Update Claude Code with `claude update` (or `npm install -g @anthropic-ai/claude-code@latest`). |
+| Summary fails with "Claude Code usage limit reached" | Your Claude Code plan's limit for that model is used up. Wait, or set `CLAUDE_CODE_MODEL` to another model (for example `sonnet`) and restart the backend. |
+| Paper page says no API key is configured (`api` mode) | Set `ANTHROPIC_API_KEY` in `.env` and restart the backend. |
+| Summary fails with "API key is missing or invalid" (`api` mode) | The key is wrong or revoked; create a new one in the Anthropic Console and update `.env`. |
 | OpenAlex search reports a rate limit | Set `OPENALEX_API_KEY` in `.env`, or search arXiv. |
 | Backend stops at startup with a "validation error for Settings" | A value in `.env` is invalid; the message names the setting and its allowed values. |
 

@@ -1,8 +1,9 @@
 import { streamSummary } from '../api'
 import { useLlmStream } from '../useLlmStream'
 import type { AppConfig, PaperDetail, SummaryFields } from '../types'
-import LlmKeyNotice from './LlmKeyNotice'
+import LlmNotice from './LlmNotice'
 import Markdown from './Markdown'
+import RichText from './RichText'
 
 interface Props {
   paper: PaperDetail
@@ -33,17 +34,21 @@ export default function SummaryPanel({ paper, llm, onSummary }: Props) {
         <button
           className={paper.summary ? 'btn small' : 'btn small primary'}
           onClick={generate}
-          disabled={stream.running || llm?.llm_key_set === false}
+          disabled={stream.running || llm?.llm_ready === false}
         >
           {stream.running ? 'Generating…' : paper.summary ? 'Regenerate' : 'Generate summary'}
         </button>
       </div>
 
-      {llm?.llm_key_set === false && <LlmKeyNotice />}
+      {llm?.llm_ready === false && <LlmNotice llm={llm} />}
       {stream.context?.truncated && (
         <p className="note">The paper is very long, so only its first part was sent to the model.</p>
       )}
-      {stream.error && <div className="alert error">{stream.error}</div>}
+      {stream.error && (
+        <div className="alert error">
+          <RichText text={stream.error} />
+        </div>
+      )}
 
       {live ? (
         stream.text ? (

@@ -77,8 +77,10 @@ class AskRequest(BaseModel):
 
 
 class AppConfig(BaseModel):
-    llm_model: str
-    llm_key_set: bool
+    llm_provider: Literal["claude-code", "api"]
+    llm_model: str  # human-readable label, e.g. "Claude Code (opus)"
+    llm_ready: bool  # whether summaries and Q&A can run
+    llm_hint: str | None  # how to fix it when not ready
 
 
 class PaperUpdate(BaseModel):

@@ -293,6 +293,84 @@ errors (keg-only Homebrew formulas, zsh comment handling, Vite's port fallback,
 uv's Python preference) were only caught because the agents actually ran the
 steps instead of reading them.
 
+## Follow-Up: Claude Code as the Default LLM Provider
+
+**Request:** the user asked for a default option that uses the Claude Code installed on
+the machine instead of requiring an Anthropic API key.
+
+**Research first (3-agent workflow, no model calls):** two agents read the Claude Code
+and Agent SDK docs; a third installed `claude-agent-sdk` 0.2.164 in a scratch
+environment and read its source plus the installed CLI's `--help`. The installed source
+was treated as ground truth, and it overturned several documentation-based assumptions:
+
+- The Python Agent SDK bundles its own 235 MB Claude Code (2.1.292) and prefers it
+  over the user's installed 2.1.293.
+- It passes the system prompt as a command-line argument: a 400K-character paper with
+  non-ASCII text fails with "Argument list too long" (tested: ARG_MAX is 1 MiB).
+- In non-interactive mode an exported `ANTHROPIC_API_KEY` silently overrides the
+  user's Claude Code login.
+- `--tools ""` does not remove MCP tools, and `@path` in a prompt is expanded into the
+  file's contents unless the message is marked `client_composed`.
+- One docs summary claimed `allowed_tools=[]` disables tools and that
+  `claude auth status` returns `authenticated`; the source showed neither is true.
+
+**Design:** call the local `claude` CLI directly (`backend/app/services/claude_code.py`)
+instead of the SDK: no 235 MB dependency, and full control over each point above.
+The paper goes in a temp file (`--system-prompt-file`); the prompt goes over stdin as
+a `client_composed` message; tools, MCP, settings, CLAUDE.md, hooks, slash commands and
+saved sessions are off (`--safe-mode`, `--strict-mcp-config`, `--setting-sources ""`,
+and more); `ANTHROPIC_API_KEY` is removed from the child environment; it runs in a
+fresh temp folder (the prompt file sits outside its working directory) in its own
+process group.
+
+**Real probes:** the first two probes (tiny prompts) failed with "You've reached your
+Fable limit": the user's Claude Code default model was Claude Fable 5.1, and its usage
+limit was reached. That is why the provider defaults to `CLAUDE_CODE_MODEL=opus` and turns usage-limit
+errors into a clear message. With `opus`, the probes confirmed streaming, the lockdown
+(`tools=[]`, no MCP, no slash commands, no session files), and that `@/etc/hosts`
+stayed literal. A real upload, summary, and two follow-up questions on a 24-page paper
+then worked; the second question read 25,482 tokens from cache.
+
+**Agent mistake during testing:** the test server failed to bind port 8000 because
+the user's own server was already running there. The agent did not notice the bind error, so
+its test requests went to the user's server and wrote a test paper, summary, and chat
+into the user's real library. Its `pkill -f "uvicorn app.main:app"` then also stopped
+the user's server. The agent removed exactly those test records (matched by PDF hash and
+timestamps) and now tests on a dedicated port, checks that the port is free, and stops only
+the process it started.
+
+**Found by a fake `claude` script (failure paths):** a timeout took 30 s instead of 2 s,
+because killing the CLI left a helper process holding its output pipes. The fix runs the CLI in its own
+process group and kills the whole group. A double period in the usage-limit message
+was also fixed.
+
+**Verification workflow (4 auditors + 4 skeptics, fake CLI except 3 tiny real calls):**
+27 findings, 26 confirmed, 1 refuted. The important ones:
+
+| Confirmed problem | Fix |
+|-------------------|-----|
+| Claude Code adds the user's **account email** and environment details (cwd, OS, shell, date) to every request; no flag removes it. Answers were rendered with remote images allowed, so a malicious PDF could try to make the model leak the email in an image URL | The UI never loads images from model output (rendered as text), a CSP `img-src 'self'` backs that up, and the prompt tells the model never to repeat account or environment details. Docs now state this limit instead of claiming a "plain text model" |
+| Chat history was flattened with plain `<user>`/`<assistant>` tags, so paper text quoted in an old answer could close the transcript and pose as the user's new question | Random per-request boundary tags; the transcript is marked as context only |
+| The read loop ended only at stdout EOF: a helper holding the pipe made a finished answer wait for the timeout, or be discarded | Stop at the `result` event; poll for the CLI's exit (asyncio's `wait()` also waits for pipes); then SIGTERM, then SIGKILL, for the whole process group |
+| macOS returns EPERM (not ESRCH) for a zombie-only process group, which masked cancellations | Handled |
+| `stdin` writes had no deadline and broke on large payloads; unexpected field types or a >16 MB line raised exceptions that made **PDF uploads return 500** | Background writer, `ensure_ascii=False`, type-checked event parsing, oversized lines skipped, metadata extraction never raises |
+| Each call left an empty scratch-folder tree in `/tmp` | `CLAUDE_CODE_TMPDIR` points into the run's temp folder |
+| No minimum version, although the lockdown flags need Claude Code 2.1.248+ | Version check in the status, with an update hint |
+| A wrong `CLAUDE_CODE_PATH` was reported as "not installed"; relative paths broke | Specific hint; relative paths anchored like `DATA_DIR` |
+| Docs and hints: "rechecks within 30 seconds" was false; `.env` hints omitted "restart the backend"; backticks shown literally | The page rechecks when you return to the tab; hints fixed; `code` rendered |
+
+**`/code-review high` after the workflow fixes (9 findings), all fixed:** an old CLI without
+`auth status --json` was reported as ready (the version is now checked first, and a
+non-zero exit means not ready); the metadata-extraction prompt lacked the
+untrusted-input and privacy rules; a model-written link with a query string could
+still carry data out on a click (now shown as text with the full URL); "not logged in"
+was cached for 10 s (now 3 s) and every tab focus could start two CLI processes (now
+only while unavailable, debounced, with one shared check); uploads waited on Claude
+Code even when it was logged out (now gated on the status, 45 s limit); an exported
+`ANTHROPIC_BASE_URL` would have routed the user's login to that endpoint (now removed
+for the child); a finished answer waited up to ~9 s for the CLI to exit (shutdown now
+runs in the background); a stale `/config` response could overwrite a newer one.
+
 ## Summary Across Milestones
 
 | Milestone | Review findings | Fixed | Documented, not changed |
@@ -304,6 +382,7 @@ steps instead of reading them.
 | M4 LLM | 9 | 9 | 0 |
 | M5 Deployment | 10 | 9 | 1 (Docker quoting; Docker later removed) |
 | M5 follow-up (setup script) | 29 confirmed by workflow + 9 from `/code-review` | 38 | 0 |
+| Follow-up: Claude Code provider | 26 confirmed by workflow + 9 from `/code-review` | 35 | 0 |
 
 Recurring pattern: the first implementation of each milestone passed its
 happy-path test. The review then found problems on unusual inputs (Unicode,
