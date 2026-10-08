@@ -8,6 +8,12 @@ import PaperPage from './pages/PaperPage'
 export default function App() {
   const route = useRoute()
   const [backendUp, setBackendUp] = useState<boolean | null>(null)
+  // Whether the open paper is in the library (an unsaved one belongs to Search);
+  // null until the paper has loaded, so no tab is claimed meanwhile.
+  const [paperInLibrary, setPaperInLibrary] = useState<{ id: number; inLibrary: boolean } | null>(null)
+  const openPaper = route.name === 'paper' && paperInLibrary?.id === route.id ? paperInLibrary : null
+  const onPaperSearchTab = openPaper?.inLibrary === false
+  const onPaperLibraryTab = openPaper?.inLibrary === true
 
   // Poll the backend until it answers, so the "unreachable" banner clears on
   // its own if the frontend was started first.
@@ -37,11 +43,11 @@ export default function App() {
           AI Research Assistant
         </a>
         <nav className="tabs">
-          <a className={route.name === 'search' ? 'tab active' : 'tab'} href="#/search">
+          <a className={route.name === 'search' || onPaperSearchTab ? 'tab active' : 'tab'} href="#/search">
             Search
           </a>
           <a
-            className={route.name === 'library' || route.name === 'paper' ? 'tab active' : 'tab'}
+            className={route.name === 'library' || onPaperLibraryTab ? 'tab active' : 'tab'}
             href="#/library"
           >
             Library
@@ -56,11 +62,17 @@ export default function App() {
         </div>
       )}
 
-      <main className="content">
+      <main className={route.name === 'paper' ? 'content wide' : 'content'}>
         {route.name === 'search' && <SearchPage />}
         {route.name === 'library' && <LibraryPage />}
         {/* key: remount per paper so no state leaks between papers */}
-        {route.name === 'paper' && <PaperPage key={route.id} id={route.id} />}
+        {route.name === 'paper' && (
+          <PaperPage
+            key={route.id}
+            id={route.id}
+            onLibraryState={(inLibrary) => setPaperInLibrary({ id: route.id, inLibrary })}
+          />
+        )}
       </main>
     </div>
   )

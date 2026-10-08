@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { clearChat, errorMessage, getChat, streamAnswer } from '../api'
 import { useLlmStream } from '../useLlmStream'
 import type { AppConfig, ChatMessage } from '../types'
@@ -18,9 +18,10 @@ const SUGGESTIONS = [
 interface Props {
   paperId: number
   llm: AppConfig | null
+  model: string | null
 }
 
-export default function ChatPanel({ paperId, llm }: Props) {
+function ChatPanel({ paperId, llm, model }: Props) {
   const [messages, setMessages] = useState<ChatMessage[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [input, setInput] = useState('')
@@ -57,7 +58,7 @@ export default function ChatPanel({ paperId, llm }: Props) {
     setPending(q)
     setInput('')
     const ok = await stream.start(
-      (onEvent, signal) => streamAnswer(paperId, q, onEvent, signal),
+      (onEvent, signal) => streamAnswer(paperId, q, model, onEvent, signal),
       (e) => e.messages && setMessages((prev) => [...(prev ?? []), ...e.messages!]),
     )
     setPending(null)
@@ -108,8 +109,12 @@ export default function ChatPanel({ paperId, llm }: Props) {
           {messages?.map((m) => (
             <div key={m.id} className={`bubble ${m.role}`}>
               {m.role === 'assistant' ? <Markdown>{m.content}</Markdown> : <p>{m.content}</p>}
-              {m.role === 'assistant' && m.context === 'abstract' && (
-                <p className="muted provenance">Based on the abstract only.</p>
+              {m.role === 'assistant' && (m.model || m.context === 'abstract') && (
+                <p className="muted provenance">
+                  {m.model}
+                  {m.model && m.context === 'abstract' && ' · '}
+                  {m.context === 'abstract' && 'based on the abstract only'}
+                </p>
               )}
             </div>
           ))}
@@ -149,7 +154,8 @@ export default function ChatPanel({ paperId, llm }: Props) {
           className="input"
           rows={2}
           maxLength={4000}
-          placeholder="Ask a question about this paper. Enter to send, Shift+Enter for a new line."
+          placeholder="Ask about this paper (Enter to send)"
+          title="Enter sends; Shift+Enter adds a new line"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
@@ -162,3 +168,6 @@ export default function ChatPanel({ paperId, llm }: Props) {
     </section>
   )
 }
+
+// Memoized: the reader re-renders on every reading-position change.
+export default memo(ChatPanel)

@@ -39,6 +39,9 @@ class PaperOut(PaperMeta):
 
     id: int
     created_at: datetime
+    # False for a paper opened from search but not saved to the library.
+    in_library: bool = True
+    saved_at: datetime | None = None
     has_pdf: bool = False
     page_count: int | None = None
     full_text_status: Literal["ok", "unavailable", "error"] | None = None
@@ -54,6 +57,23 @@ class PaperDetail(PaperOut):
     summary_created_at: datetime | None = None
 
 
+class OutlineSection(BaseModel):
+    level: int
+    title: str
+    page: int | None = None  # 1-based; None if the heading could not be located
+    top: float | None = None  # position on the page: 0 = top, 1 = bottom
+    summary: str | None = None
+
+
+class OutlineOut(BaseModel):
+    available: bool  # False when there is no PDF to read the structure from
+    reason: str | None = None
+    sections: list[OutlineSection] = []
+    summarized: bool = False
+    model: str | None = None  # model that wrote the one-sentence summaries
+    summarized_at: datetime | None = None
+
+
 class ChatMessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -67,6 +87,7 @@ class ChatMessageOut(BaseModel):
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
+    model: str | None = Field(None, max_length=100)  # one of AppConfig.llm_models; default if None
 
     @field_validator("question")
     @classmethod
@@ -76,11 +97,22 @@ class AskRequest(BaseModel):
         return v.strip()
 
 
+class ModelOption(BaseModel):
+    id: str
+    label: str
+
+
 class AppConfig(BaseModel):
     llm_provider: Literal["claude-code", "api"]
     llm_model: str  # human-readable label, e.g. "Claude Code (opus)"
     llm_ready: bool  # whether summaries and Q&A can run
     llm_hint: str | None  # how to fix it when not ready
+    llm_models: list[ModelOption]  # what the reader's model menu offers
+    llm_default_model: str  # id of the model used when none is chosen
+
+
+class OutlineSummaryRequest(BaseModel):
+    model: str | None = Field(None, max_length=100)
 
 
 class PaperUpdate(BaseModel):

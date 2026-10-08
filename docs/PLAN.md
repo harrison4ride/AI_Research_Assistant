@@ -58,3 +58,4 @@ fix findings → commit. Review outcomes are logged in `docs/DEVLOG.md`.
 | M3 | PDF upload + processing: upload endpoint, PDF storage, text + metadata extraction, full-text fetch for saved search papers, editable metadata | F3 |
 | M4 | LLM: Claude integration, streamed summary, streamed Q&A chat with persisted history, LLM-assisted metadata extraction | F4, F5 |
 | M5 | README, INSTALL.md + setup script, single-process production build, end-to-end verification | submission |
+| M6 | Reader for any paper (opened from search without saving): section outline with one-sentence summaries, in-page PDF viewer, Q&A; model menu for section summaries, the summary, and Q&A; OpenAlex as the default search source; arXiv rate-limit handling | F1–F5 usability |

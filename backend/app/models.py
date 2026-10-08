@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -76,6 +77,21 @@ class Paper(Base):
     # "full_text" or "abstract": what the summary was based on.
     summary_context: Mapped[str | None] = mapped_column(String(20))
     summary_created_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    # Papers opened from search but not saved are kept as a cache: not listed in
+    # the library, and deleted after CACHED_PAPER_DAYS without being opened.
+    # (Nullable only so older databases can gain the column; init_db backfills it.)
+    in_library: Mapped[bool | None] = mapped_column(Boolean, default=True)
+    # When it was added to the library (opened papers are often saved later).
+    saved_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_opened_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    # Section outline for the reader: [{level, title, page, top, summary}], plus
+    # the model that wrote the one-sentence summaries (None until summarized).
+    # Deferred: only the reader's outline endpoints load it, never the library list.
+    outline: Mapped[list[dict] | None] = mapped_column(JSON, deferred=True)
+    outline_model: Mapped[str | None] = mapped_column(String(100))
+    outline_summarized_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 

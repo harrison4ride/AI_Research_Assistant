@@ -33,14 +33,14 @@ missing.
 | Tool | Version | Used for | How to install | Check |
 |------|---------|----------|----------------|-------|
 | [uv](https://docs.astral.sh/uv/) | Recent release (tested with 0.11.17) | Provides Python 3.11 and installs the backend packages | `curl -LsSf https://astral.sh/uv/install.sh \| sh` or `brew install uv` | `uv --version` |
-| [Node.js](https://nodejs.org) | 20.19 or later in the 20.x line, or 22.12 or later (tested with 22.22.0) | Builds and serves the frontend | Installer from nodejs.org, `brew install node`, or `nvm install 22` | `node --version` |
+| [Node.js](https://nodejs.org) | 22.13 or later (tested with 22.22.0) | Builds and serves the frontend | Installer from nodejs.org, `brew install node`, or `nvm install 22` | `node --version` |
 | npm | Comes with Node.js (tested with 10.9.4) | Installs the frontend packages | Included with Node.js | `npm --version` |
 | git | Any | Cloning the repository | `xcode-select --install` (macOS) or `sudo apt install git` | `git --version` |
 | make | Any (optional) | The `make dev` / `make start` shortcuts | `xcode-select --install` (macOS) or `sudo apt install make` | `make --version` |
 | [Claude Code](https://claude.com/claude-code) | 2.1.248 or later (tested with 2.1.293), logged in | Summaries and Q&A by default, through your own Claude Code login. Not needed with `LLM_PROVIDER=api`. | `npm install -g @anthropic-ai/claude-code`, or see the [setup guide](https://code.claude.com/docs/en/setup); then run `claude` once and log in | `claude --version`, then `claude auth status` |
 
-The Node.js range comes from Vite 8, which requires `^20.19.0 || >=22.12.0`.
-Node.js 21 and Node.js 22.0 to 22.11 are not supported. With Homebrew, prefer
+The Node.js minimum comes from PDF.js 6 (the reader's PDF viewer), which requires
+22.13 or later; Vite 8 alone would accept `^20.19.0 || >=22.12.0`. With Homebrew, prefer
 `brew install node`: the versioned `node@22` formula does not put `node` on your
 PATH unless you also run `brew link --overwrite node@22`.
 
@@ -71,12 +71,14 @@ directory, OS, shell, and the date. The prompts tell the model never to repeat
 these details, and the app never loads images from model output, so an answer
 cannot send them anywhere by itself.
 
-The app removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the environment
-it gives Claude Code, so an API key exported in your shell cannot replace your
-login. Other Claude Code variables you export (for example `ANTHROPIC_PROFILE` or
-`CLAUDE_CODE_USE_BEDROCK`) still apply, as they do in your terminal. The model is
-`opus` unless you set `CLAUDE_CODE_MODEL`; summaries and answers count toward your
-Claude Code usage limits.
+The app removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_BASE_URL`
+from the environment it gives Claude Code, so an API key or proxy exported in your
+shell cannot replace or redirect your login. Other Claude Code variables you export
+(for example `ANTHROPIC_PROFILE` or `CLAUDE_CODE_USE_BEDROCK`) still apply, as they do
+in your terminal. The reader's **Model** menu picks the model (Opus, Sonnet, Haiku,
+Fable, or Claude Code's own default); `CLAUDE_CODE_MODEL` (default `opus`) sets the
+menu's default and the model that reads uploaded PDFs. Summaries and answers count
+toward your Claude Code usage limits.
 
 This mode is meant for running the app yourself with your own login. Anthropic's
 Claude Code documentation says: "Unless previously approved, Anthropic does not allow
@@ -102,7 +104,7 @@ download caches in your home directory, shared with your other projects.
 | Location | Contents | Size (approx.) |
 |----------|----------|----------------|
 | `backend/.venv/` | Python packages | 130 MB |
-| `frontend/node_modules/` | JavaScript packages | 90 MB |
+| `frontend/node_modules/` | JavaScript packages | 170 MB |
 | `backend/data/` | Created at runtime: the SQLite database and stored PDFs | Grows with your library |
 | `~/.local/share/uv/python/` | Python 3.11, only if uv had to download it | 85 MB |
 | `~/.cache/uv/` | uv's package download cache | 100 MB |
@@ -132,6 +134,7 @@ Exact versions are locked in `frontend/package-lock.json`; `npm ci` installs exa
 |---------|----------------|---------|
 | react, react-dom | 19.3.0 | User interface |
 | react-markdown | 10.1.0 | Renders the model's Markdown answers |
+| react-pdf (with pdfjs-dist) | 11.0.0 (6.3.289) | Renders the PDF in the reader |
 | remark-gfm | 4.0.1 | Tables and lists in those answers |
 | vite | 8.3.3 | Development server and production build (dev only) |
 | @vitejs/plugin-react | 6.1.2 | React support for Vite (dev only) |
@@ -153,18 +156,19 @@ the backend after changing `.env`.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `LLM_PROVIDER` | `claude-code` | `claude-code` (local Claude Code login) or `api` (Anthropic API key); see above |
-| `CLAUDE_CODE_MODEL` | `opus` | Claude Code model alias or name; `default` uses Claude Code's own default |
+| `CLAUDE_CODE_MODEL` | `opus` | Default of the reader's Model menu (and the model for upload metadata): a Claude Code alias or name; `default` uses Claude Code's own default |
 | `CLAUDE_CODE_PATH` | found on PATH | Path to the `claude` command |
 | `ANTHROPIC_API_KEY` | none | Anthropic API key (`api` only) |
 | `ANTHROPIC_BASE_URL` | Anthropic API | Alternative API endpoint, such as a proxy (`api` only) |
-| `LLM_MODEL` | `claude-opus-5` | Claude model (`api` only) |
-| `LLM_EFFORT` | `medium` | How much the model thinks, for both providers: `low`, `medium`, `high`, `xhigh`, `max` |
+| `LLM_MODEL` | `claude-opus-5` | Default of the reader's Model menu (and the model for upload metadata) in `api` mode |
+| `LLM_EFFORT` | `medium` | How much the model thinks, for both providers: `low`, `medium`, `high`, `xhigh`, `max` (not used for Claude Haiku 4.5 in `api` mode, which does not support it) |
 | `LLM_MAX_TOKENS` | `32000` | Upper limit on thinking plus answer tokens per response (`api` only) |
 | `LLM_MAX_PAPER_CHARS` | `400000` | Paper text sent to the model, about 100K tokens; longer papers are cut off |
 | `LLM_HISTORY_MESSAGES` | `20` | Earlier Q&A messages sent with each new question |
 | `LLM_EXTRACT_METADATA` | `true` | Let Claude read an uploaded PDF's first pages for title, authors, year, and abstract |
 | `OPENALEX_EMAIL`, `OPENALEX_API_KEY` | none | Optional OpenAlex identification and quota (see above) |
 | `MAX_PDF_MB` | `50` | Size limit for uploaded and downloaded PDFs |
+| `CACHED_PAPER_DAYS` | `30` | Papers opened from search but never saved are deleted (with their PDF and chat) once they have not been opened for this many days; checked at startup and every 12 hours |
 | `DATA_DIR` | `backend/data` | Where the database and PDFs are stored; relative paths are resolved against `backend/` |
 | `SERVE_FRONTEND` | `true` | Whether the backend also serves the built UI; `make dev` sets it to `false` |
 | `FRONTEND_DIST` | `frontend/dist` | The built UI that the backend serves; relative paths are resolved against `backend/` |
@@ -289,8 +293,9 @@ Open <http://localhost:8000>.
    `{"status":"ok"}`.
 3. In the UI, search for "attention is all you need". Results should appear within a
    few seconds.
-4. Save a paper, open it, and click **Generate summary**. If Claude Code is missing
-   or logged out (or, in `api` mode, the key is missing or wrong), the panel says so.
+4. Open a paper, go to the **Summary** tab, and click **Generate summary** (or click
+   **Summarize sections** in the Sections tab). If Claude Code is missing or logged out
+   (or, in `api` mode, the key is missing or wrong), the panel says so.
 
 ## Troubleshooting
 
@@ -310,7 +315,8 @@ Open <http://localhost:8000>.
 | Paper page says `CLAUDE_CODE_PATH` is not an executable file | Fix or remove `CLAUDE_CODE_PATH` in `.env` and restart the backend. |
 | Paper page says Claude Code is not logged in | Run `claude auth login` in a terminal, then switch back to the browser tab: the page rechecks when you return (at most every few seconds). |
 | Paper page says Claude Code is too old, or a summary fails with "unknown option" | Update Claude Code with `claude update` (or `npm install -g @anthropic-ai/claude-code@latest`). |
-| Summary fails with "Claude Code usage limit reached" | Your Claude Code plan's limit for that model is used up. Wait, or set `CLAUDE_CODE_MODEL` to another model (for example `sonnet`) and restart the backend. |
+| Summary fails with "Claude Code usage limit reached" | Your Claude Code plan's limit for that model is used up. Wait, or pick another model (for example Sonnet) in the reader's **Model** menu. |
+| Search says "arXiv is limiting requests right now" | arXiv rate-limits all requests from your IP address. The app pauses arXiv for a minute or more; click **Search OpenAlex instead**, or try arXiv again later. |
 | Paper page says no API key is configured (`api` mode) | Set `ANTHROPIC_API_KEY` in `.env` and restart the backend. |
 | Summary fails with "API key is missing or invalid" (`api` mode) | The key is wrong or revoked; create a new one in the Anthropic Console and update `.env`. |
 | OpenAlex search reports a rate limit | Set `OPENALEX_API_KEY` in `.env`, or search arXiv. |

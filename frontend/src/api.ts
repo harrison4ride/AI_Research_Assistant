@@ -3,6 +3,7 @@
 import type {
   AppConfig,
   ChatMessage,
+  Outline,
   Paper,
   PaperDetail,
   PaperMeta,
@@ -90,6 +91,31 @@ export function getPaper(id: number) {
   return apiFetch<PaperDetail>(`/api/papers/${id}`)
 }
 
+// Open a search result in the reader without adding it to the library.
+export function openPaper(meta: PaperMeta) {
+  return apiFetch<Paper>('/api/papers/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(meta),
+  })
+}
+
+export function saveToLibrary(id: number) {
+  return apiFetch<PaperDetail>(`/api/papers/${id}/save`, { method: 'POST' })
+}
+
+export function getOutline(id: number) {
+  return apiFetch<Outline>(`/api/papers/${id}/outline`)
+}
+
+export function summarizeOutline(id: number, model: string | null) {
+  return apiFetch<Outline>(`/api/papers/${id}/outline/summaries`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  })
+}
+
 export function savePaper(meta: PaperMeta) {
   return apiFetch<Paper>('/api/papers', {
     method: 'POST',
@@ -172,17 +198,24 @@ async function streamEvents(
   if (buffer.trim()) onEvent(JSON.parse(buffer) as StreamEvent)
 }
 
-export function streamSummary(id: number, onEvent: (e: StreamEvent) => void, signal: AbortSignal) {
-  return streamEvents(`/api/papers/${id}/summary`, undefined, onEvent, signal)
+export function streamSummary(
+  id: number,
+  model: string | null,
+  onEvent: (e: StreamEvent) => void,
+  signal: AbortSignal,
+) {
+  const query = model ? `?${new URLSearchParams({ model })}` : ''
+  return streamEvents(`/api/papers/${id}/summary${query}`, undefined, onEvent, signal)
 }
 
 export function streamAnswer(
   id: number,
   question: string,
+  model: string | null,
   onEvent: (e: StreamEvent) => void,
   signal: AbortSignal,
 ) {
-  return streamEvents(`/api/papers/${id}/chat`, { question }, onEvent, signal)
+  return streamEvents(`/api/papers/${id}/chat`, { question, model }, onEvent, signal)
 }
 
 export function getChat(id: number) {

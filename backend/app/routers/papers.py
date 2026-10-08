@@ -3,11 +3,12 @@
 import logging
 import re
 import unicodedata
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
@@ -15,11 +16,12 @@ from sqlalchemy.orm.exc import StaleDataError
 from ..config import get_settings
 from ..db import get_db
 from ..models import Paper
-from ..schemas import PaperDetail, PaperMeta, PaperOut, PaperUpdate, SavedKey
+from ..schemas import OutlineOut, PaperDetail, PaperMeta, PaperOut, PaperUpdate, SavedKey
 from ..services import arxiv, llm, pdf
 from ..services.fulltext import (
     attach_pdf,
     ensure_full_text,
+    paper_lock,
     looks_like_pdf,
     remove_pdf_if_unused,
     sha256,
@@ -79,7 +81,11 @@ def list_papers(
     q: str | None = Query(None, max_length=200, description="Filter by title, author, or abstract"),
     db: Session = Depends(get_db),
 ) -> list[Paper]:
-    papers = list(db.scalars(select(Paper).order_by(Paper.created_at.desc(), Paper.id.desc())))
+    papers = list(db.scalars(
+        select(Paper)
+        .where(Paper.in_library.is_(True))
+        .order_by(func.coalesce(Paper.saved_at, Paper.created_at).desc(), Paper.id.desc())
+    ))
     # A personal library is small, so filtering in Python is fast and gets
     # Unicode case-insensitivity right.
     if q and q.strip():
@@ -92,36 +98,68 @@ def list_papers(
 def saved_keys(db: Session = Depends(get_db)) -> list[SavedKey]:
     """Identities of saved search results, so the search page can mark them as saved."""
     rows = db.execute(
-        select(Paper.source, Paper.external_id, Paper.id).where(Paper.external_id.is_not(None))
+        select(Paper.source, Paper.external_id, Paper.id).where(
+            Paper.external_id.is_not(None), Paper.in_library.is_(True)
+        )
     )
     return [SavedKey(source=s, external_id=e, id=i) for s, e, i in rows]
 
 
-@router.post("", response_model=PaperOut, status_code=status.HTTP_201_CREATED)
-def save_paper(meta: PaperMeta, response: Response, db: Session = Depends(get_db)) -> Paper:
-    """Save a search result. Saving a paper that is already saved returns that entry (200)."""
+def _get_or_create(meta: PaperMeta, db: Session, *, save: bool) -> tuple[Paper, bool]:
+    """The library entry for a search result, created if needed. Returns (paper, created).
+
+    `save=True` puts it in the library (and promotes an unsaved copy that was
+    only opened before, keeping its chat and outline); `save=False` only opens
+    it for reading, leaving it out of the library.
+    """
     if meta.source == "upload":
         raise HTTPException(422, "Use the upload endpoint to add PDF files.")
     if not meta.external_id:
-        raise HTTPException(422, "external_id is required to save a search result.")
+        raise HTTPException(422, "external_id is required for a search result.")
+    now = datetime.now(timezone.utc)
+
+    def reuse(existing: Paper) -> tuple[Paper, bool]:
+        if save:
+            if not existing.in_library:
+                existing.in_library, existing.saved_at = True, now
+        else:
+            existing.last_opened_at = now
+        db.commit()
+        db.refresh(existing)
+        return existing, False
 
     if existing := find_duplicate(meta, db):
-        response.status_code = status.HTTP_200_OK
-        return existing
-
-    paper = Paper(**meta.model_dump())
+        return reuse(existing)
+    paper = Paper(**meta.model_dump(), in_library=save, saved_at=now if save else None, last_opened_at=now)
     db.add(paper)
     try:
         db.commit()
     except IntegrityError:
-        # A concurrent request saved the same paper first.
+        # A concurrent request created the same paper first.
         db.rollback()
         existing = find_duplicate(meta, db)
         if existing is None:
             raise
-        response.status_code = status.HTTP_200_OK
-        return existing
+        return reuse(existing)
     db.refresh(paper)
+    return paper, True
+
+
+@router.post("", response_model=PaperOut, status_code=status.HTTP_201_CREATED)
+def save_paper(meta: PaperMeta, response: Response, db: Session = Depends(get_db)) -> Paper:
+    """Save a search result to the library (200 with the existing entry if already there)."""
+    paper, created = _get_or_create(meta, db, save=True)
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return paper
+
+
+@router.post("/open", response_model=PaperOut, status_code=status.HTTP_201_CREATED)
+def open_paper(meta: PaperMeta, response: Response, db: Session = Depends(get_db)) -> Paper:
+    """Open a search result in the reader without saving it to the library."""
+    paper, created = _get_or_create(meta, db, save=False)
+    if not created:
+        response.status_code = status.HTTP_200_OK
     return paper
 
 
@@ -191,6 +229,8 @@ async def upload_pdf(
     fallback_title = (file.filename or "Untitled PDF").removesuffix(".pdf").removesuffix(".PDF")
     paper = Paper(
         source="upload",
+        in_library=True,
+        saved_at=datetime.now(timezone.utc),
         external_id=digest,
         title=extracted.title or fallback_title,
         authors=extracted.authors,
@@ -230,7 +270,75 @@ async def upload_pdf(
 
 @router.get("/{paper_id}", response_model=PaperDetail)
 def get_paper(paper_id: int, db: Session = Depends(get_db)) -> Paper:
-    return get_paper_or_404(paper_id, db)
+    paper = get_paper_or_404(paper_id, db)
+    if not paper.in_library:
+        # Keeps it from being pruned. A single UPDATE (not an ORM flush) so a
+        # concurrent delete simply matches no row.
+        db.execute(
+            update(Paper)
+            .where(Paper.id == paper_id, Paper.in_library.is_(False))
+            .values(last_opened_at=datetime.now(timezone.utc))
+        )
+        db.commit()
+    return paper
+
+
+@router.post("/{paper_id}/save", response_model=PaperDetail)
+def save_existing(paper_id: int, db: Session = Depends(get_db)) -> Paper:
+    """Add a paper that was only opened for reading to the library."""
+    paper = get_paper_or_404(paper_id, db)
+    if not paper.in_library:
+        paper.in_library, paper.saved_at = True, datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(paper)
+    return paper
+
+
+@router.get("/{paper_id}/outline", response_model=OutlineOut)
+async def get_outline(paper_id: int, db: Session = Depends(get_db)) -> OutlineOut:
+    """The paper's sections (from its PDF), with one-sentence summaries once generated."""
+    paper = get_paper_or_404(paper_id, db)
+    if not await ensure_full_text(paper, db):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Paper not found.")
+    return await ensure_outline(paper, db)
+
+
+async def ensure_outline(paper: Paper, db: Session) -> OutlineOut:
+    """Read the section structure from the stored PDF the first time it is needed.
+
+    One extraction per paper at a time; if the PDF is replaced meanwhile, the
+    result is dropped instead of being stored for the wrong file.
+    """
+    async with paper_lock(paper.id):
+        db.refresh(paper)
+        if paper.outline is None:
+            pdf_path = paper.pdf_path
+            path = get_settings().pdf_dir / pdf_path if pdf_path else None
+            if path is None or not path.is_file():
+                return OutlineOut(available=False, reason="The outline needs the paper's PDF.")
+            try:
+                entries = await run_in_threadpool(lambda: pdf.extract_outline(path.read_bytes()))
+            except pdf.PdfError as exc:
+                return OutlineOut(available=False, reason=str(exc))
+            db.refresh(paper)
+            if paper.pdf_path != pdf_path:
+                raise HTTPException(409, "The paper's PDF changed while it was being read. Try again.")
+            paper.outline = [
+                {"level": e.level, "title": e.title, "page": e.page, "top": round(e.top, 4), "summary": None}
+                for e in entries
+            ]
+            db.commit()
+    return outline_out(paper)
+
+
+def outline_out(paper: Paper) -> OutlineOut:
+    return OutlineOut(
+        available=True,
+        sections=paper.outline or [],
+        summarized=paper.outline_summarized_at is not None,
+        model=paper.outline_model,
+        summarized_at=paper.outline_summarized_at,
+    )
 
 
 @router.patch("/{paper_id}", response_model=PaperDetail)

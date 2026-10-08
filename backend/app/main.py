@@ -1,8 +1,9 @@
 """FastAPI entry point for the AI Research Assistant backend."""
 
 import html
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
@@ -11,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import BACKEND_DIR, get_settings
 from .db import init_db
 from .routers import assistant, papers, search
+from .services.cache import prune_cached_papers
 from .services.http import close_client
 
 
@@ -25,8 +27,23 @@ async def lifespan(_: FastAPI):
             "backend/.env is not read; move its settings into .env in the project root."
         )
     init_db()
+    prune_cached_papers()
+    pruner = asyncio.create_task(_prune_periodically())
     yield
+    pruner.cancel()
+    with suppress(asyncio.CancelledError):
+        await pruner
     await close_client()
+
+
+async def _prune_periodically() -> None:
+    """Also clean up unsaved papers while the server keeps running (not only at startup)."""
+    while True:
+        await asyncio.sleep(12 * 3600)
+        try:
+            await asyncio.to_thread(prune_cached_papers)
+        except Exception:
+            logging.getLogger(__name__).exception("Pruning unsaved papers failed")
 
 
 app = FastAPI(title="AI Research Assistant", lifespan=lifespan)

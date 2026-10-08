@@ -64,6 +64,9 @@ def init_db() -> None:
                 col_type = column.type.compile(engine.dialect)
                 conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}'))
                 log.info("Added column %s.%s", table.name, column.name)
+        # Papers saved before the reader existed are all library papers, saved when created.
+        conn.execute(text("UPDATE papers SET in_library = 1 WHERE in_library IS NULL"))
+        conn.execute(text("UPDATE papers SET saved_at = created_at WHERE in_library = 1 AND saved_at IS NULL"))
 
 
 def get_db() -> Iterator[Session]:

@@ -15,6 +15,20 @@ export function parseHash(hash: string): Route {
   return { name: 'search' }
 }
 
+// Each history entry made inside the app records its depth (0 = the page the
+// app was opened on). "Back" may use history.back() only above depth 0;
+// browser back/forward restores the entry's own depth, so this stays correct.
+function depth(): number {
+  const state = window.history.state as { depth?: unknown } | null
+  return typeof state?.depth === 'number' ? state.depth : 0
+}
+
+let lastDepth = 0
+
+export function canGoBack(): boolean {
+  return depth() > 0
+}
+
 function canonicalHash(route: Route): string {
   return route.name === 'paper' ? `#/paper/${route.id}` : `#/${route.name}`
 }
@@ -27,13 +41,26 @@ export function useRoute(): Route {
       // Rewrite unknown or non-canonical hashes (e.g. trailing slash) so the
       // address bar always matches the page being shown.
       if (window.location.hash !== canonicalHash(next)) {
-        window.history.replaceState(null, '', canonicalHash(next))
+        window.history.replaceState(window.history.state, '', canonicalHash(next))
       }
       setRoute(next)
     }
+    const onHashChange = () => {
+      const state = window.history.state as { depth?: unknown } | null
+      if (typeof state?.depth !== 'number') {
+        // A new entry (link click or assignment): one level deeper than the last one.
+        window.history.replaceState({ ...(state ?? {}), depth: lastDepth + 1 }, '')
+      }
+      lastDepth = depth()
+      onChange()
+    }
+    if (typeof (window.history.state as { depth?: unknown } | null)?.depth !== 'number') {
+      window.history.replaceState({ ...(window.history.state ?? {}), depth: 0 }, '')
+    }
+    lastDepth = depth()
     onChange()
-    window.addEventListener('hashchange', onChange)
-    return () => window.removeEventListener('hashchange', onChange)
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
   return route
 }

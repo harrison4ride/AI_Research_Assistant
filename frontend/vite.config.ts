@@ -50,4 +50,9 @@ export default defineConfig({
       '/api': 'http://127.0.0.1:8000',
     },
   },
+  build: {
+    // The PDF viewer chunk (PDF.js, ~630 kB) is loaded lazily, only on the
+    // reader page, so its size does not slow down the rest of the app.
+    chunkSizeWarningLimit: 700,
+  },
 })

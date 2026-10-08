@@ -20,6 +20,9 @@ export interface PaperMeta {
 export interface Paper extends PaperMeta {
   id: number
   created_at: string
+  // False for a paper opened from search but not saved to the library.
+  in_library: boolean
+  saved_at: string | null
   has_pdf: boolean
   page_count: number | null
   // null = not attempted yet
@@ -51,11 +54,35 @@ export interface ChatMessage {
   created_at: string
 }
 
+export interface ModelOption {
+  id: string
+  label: string
+}
+
 export interface AppConfig {
   llm_provider: 'claude-code' | 'api'
   llm_model: string // human-readable label, e.g. "Claude Code (opus)"
   llm_ready: boolean // whether summaries and Q&A can run
   llm_hint: string | null // how to fix it when not ready
+  llm_models: ModelOption[] // what the model menu offers
+  llm_default_model: string
+}
+
+export interface OutlineSection {
+  level: number
+  title: string
+  page: number | null // 1-based
+  top: number | null // position on the page: 0 = top, 1 = bottom
+  summary: string | null
+}
+
+export interface Outline {
+  available: boolean
+  reason: string | null
+  sections: OutlineSection[]
+  summarized: boolean
+  model: string | null
+  summarized_at: string | null
 }
 
 // Events streamed (as newline-delimited JSON) by the summary and chat endpoints.

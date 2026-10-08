@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { streamSummary } from '../api'
 import { useLlmStream } from '../useLlmStream'
 import type { AppConfig, PaperDetail, SummaryFields } from '../types'
@@ -8,15 +9,16 @@ import RichText from './RichText'
 interface Props {
   paper: PaperDetail
   llm: AppConfig | null
+  model: string | null
   onSummary: (fields: SummaryFields) => void
 }
 
-export default function SummaryPanel({ paper, llm, onSummary }: Props) {
+function SummaryPanel({ paper, llm, model, onSummary }: Props) {
   const stream = useLlmStream()
 
   function generate() {
     stream.start(
-      (onEvent, signal) => streamSummary(paper.id, onEvent, signal),
+      (onEvent, signal) => streamSummary(paper.id, model, onEvent, signal),
       (e) => {
         if (!e.paper) return
         const { summary, summary_model, summary_context, summary_created_at } = e.paper
@@ -75,3 +77,6 @@ export default function SummaryPanel({ paper, llm, onSummary }: Props) {
     </section>
   )
 }
+
+// Memoized: the reader re-renders on every reading-position change.
+export default memo(SummaryPanel)

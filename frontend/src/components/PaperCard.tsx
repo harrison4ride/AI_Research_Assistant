@@ -27,6 +27,8 @@ interface Props {
   paper: PaperMeta
   // Optional title link target (e.g. the library detail page); falls back to the external URL.
   href?: string
+  // If set, clicking the title calls this instead (e.g. open the paper in the reader).
+  onOpen?: () => void
   actions?: ReactNode
   // Show the whole abstract without the "show more" toggle (detail page).
   defaultExpanded?: boolean
@@ -40,6 +42,7 @@ export default function PaperCard({
   actions,
   defaultExpanded = false,
   localPdfHref,
+  onOpen,
 }: Props) {
   const pdfHref = paper.pdf_url ?? localPdfHref
   const [showFull, setShowFull] = useState(defaultExpanded)
@@ -50,7 +53,17 @@ export default function PaperCard({
     <article className="card paper-card">
       <div className="paper-card-head">
         <h2 className="paper-title">
-          {titleHref ? (
+          {onOpen ? (
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault()
+                onOpen()
+              }}
+            >
+              {paper.title}
+            </a>
+          ) : titleHref ? (
             <a href={titleHref} {...(external && { target: '_blank', rel: 'noreferrer' })}>
               {paper.title}
             </a>

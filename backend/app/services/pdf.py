@@ -210,3 +210,224 @@ def title_on_page(title: str, page_text: str) -> bool:
     """True if `title` appears on the page, ignoring case, spacing, and punctuation."""
     squashed = _squash(title)
     return len(squashed) >= 8 and squashed in _squash(page_text)
+
+
+# --- Section outline (for the reader's left panel) ------------------------------
+
+SECTION_NUMBER_RE = re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}\.?$")
+NUMBERED_HEADING_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,2})\.?\s+([A-Z][^\n]{1,80})$")
+NAMED_HEADING_RE = re.compile(
+    r"^(abstract|introduction|related work|background|methods?|methodology|approach|"
+    r"experiments?|experimental setup|results|discussion|analysis|conclusions?|limitations|"
+    r"acknowledge?ments|references|bibliography)$",
+    re.IGNORECASE,
+)
+END_SECTIONS = {"references", "bibliography"}
+# Headings that stay unnumbered even in papers with numbered sections. Other named
+# headings ("Methods", "Results") in such papers are usually table or figure labels.
+UNNUMBERED_SECTIONS = {"abstract", "limitations", "acknowledgments", "acknowledgements", "references", "bibliography"}
+
+# Limits for untrusted PDFs: an outline is shown in full and sent to the model.
+MAX_OUTLINE_ENTRIES = 120
+MAX_TITLE_CHARS = 200
+
+
+@dataclass
+class OutlineEntry:
+    level: int  # 1 = section, 2 = subsection
+    title: str
+    page: int  # 1-based
+    top: float  # position on the page, 0 = top, 1 = bottom
+
+
+@dataclass
+class _Line:
+    page: int
+    y: float
+    x0: float
+    x1: float
+    text: str
+    size: float
+    bold: bool
+    height: float
+
+
+def _clean_title(title: str) -> str:
+    """Normalize PDF text (ligatures such as "ﬁ", odd spacing) and bound its length."""
+    return unicodedata.normalize("NFKC", " ".join(str(title).split()))[:MAX_TITLE_CHARS]
+
+
+def _bookmark_top(doc: pymupdf.Document, page: int, dest: object) -> float:
+    """Where a bookmark points on its page: 0 = top, 1 = bottom."""
+    if not isinstance(dest, dict) or page > doc.page_count:
+        return 0.0
+    to = dest.get("to")
+    height = doc[page - 1].rect.height
+    if to is None or not height or (to.x == 0 and to.y == 0):
+        return 0.0  # /Fit or a destination without a position: the page's top
+    # PyMuPDF reports named destinations (LaTeX hyperref) in PDF coordinates,
+    # whose origin is the bottom of the page, and explicit ones from the top.
+    top = 1 - to.y / height if dest.get("kind") == pymupdf.LINK_NAMED else to.y / height
+    return min(max(top, 0.0), 1.0)
+
+
+def _outline_from_bookmarks(doc: pymupdf.Document) -> list[OutlineEntry]:
+    toc = [(level, title, page, dest) for level, title, page, dest in doc.get_toc(simple=False)
+           if 1 <= page <= doc.page_count and level <= 2]
+    if len(toc) > MAX_OUTLINE_ENTRIES:
+        toc = [entry for entry in toc if entry[0] == 1]  # sections only
+    entries = []
+    for level, title, page, dest in toc[:MAX_OUTLINE_ENTRIES]:
+        if title := _clean_title(title):
+            entries.append(OutlineEntry(level, title, page, _bookmark_top(doc, page, dest)))
+    return entries
+
+
+def _page_lines(page: pymupdf.Page, pno: int, sizes: Counter) -> list[_Line]:
+    lines = []
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            if abs(line["dir"][0] - 1) > 0.01:
+                continue
+            spans = [s for s in line["spans"] if s["text"].strip()]
+            if not spans:
+                continue
+            for s in spans:
+                sizes[round(s["size"], 1)] += len(s["text"])
+            bold = all(
+                (s["flags"] & 16) or re.search(r"bold|black|semibold|medi", s["font"], re.IGNORECASE)
+                for s in spans
+            )
+            lines.append(_Line(
+                page=pno + 1, y=line["bbox"][1], x0=line["bbox"][0], x1=line["bbox"][2],
+                text=" ".join("".join(s["text"] for s in spans).split()),
+                size=max(s["size"] for s in spans), bold=bool(bold), height=page.rect.height,
+            ))
+    return lines
+
+
+def _join_split_numbers(lines: list[_Line]) -> list[_Line]:
+    """Some templates (e.g. ACL) set "3" and "BERT" as separate lines side by side."""
+    merged, used = [], set()
+    for i, line in enumerate(lines):
+        if i in used:
+            continue
+        if line.bold and SECTION_NUMBER_RE.match(line.text):
+            for j, other in enumerate(lines):
+                if (j != i and j not in used and other.bold and abs(other.y - line.y) < 2
+                        and 0 <= other.x0 - line.x1 < 40):
+                    other.text = f"{line.text.rstrip('.')} {other.text}"
+                    used.add(i)
+                    break
+            if i in used:
+                continue
+        merged.append(line)
+    return merged
+
+
+def _outline_from_headings(doc: pymupdf.Document) -> list[OutlineEntry]:
+    """Detect numbered or well-known section headings by emphasis (bold or larger text)."""
+    sizes: Counter = Counter()
+    pages = []
+    for pno in range(doc.page_count):
+        # Joining runs per page, so its cost grows with lines per page, not per document.
+        pages.append(_join_split_numbers(_page_lines(doc[pno], pno, sizes)))
+    body = sizes.most_common(1)[0][0] if sizes else 10.0
+    lines = [line for page in pages for line in page]
+
+    def emphasized(line: _Line) -> bool:
+        return line.bold or line.size >= body + 0.8
+
+    numbered_count = sum(1 for line in lines if emphasized(line) and NUMBERED_HEADING_RE.match(line.text))
+    entries: list[OutlineEntry] = []
+    seen: set[str] = set()
+    for i, line in enumerate(lines):
+        text = line.text
+        if len(text) > 90 or text.endswith((".", ",", ";", ":")) or not emphasized(line):
+            continue
+        if m := NUMBERED_HEADING_RE.match(text):
+            number, rest = m.groups()
+            if int(number.split(".")[0]) > 20 or len(re.findall(r"[A-Za-z]", rest)) < 3:
+                continue
+            if number.count(".") > 1:
+                continue  # sub-subsections: too fine for the outline
+            level, title = number.count(".") + 1, f"{number} {rest}"
+            # A long heading can wrap: take the next line too if it continues it.
+            nxt = lines[i + 1] if i + 1 < len(lines) else None
+            if (nxt and nxt.page == line.page and abs(nxt.x0 - line.x0) < 40
+                    and 0 < nxt.y - line.y < 2 * line.size and abs(nxt.size - line.size) < 0.5
+                    and nxt.bold == line.bold and not NUMBERED_HEADING_RE.match(nxt.text)
+                    and not NAMED_HEADING_RE.match(nxt.text) and len(nxt.text) <= 80
+                    and not nxt.text.endswith(".")):
+                title = f"{title} {nxt.text}"
+        elif NAMED_HEADING_RE.match(text):
+            if numbered_count >= 3 and text.lower() not in UNNUMBERED_SECTIONS:
+                continue
+            level, title = 1, text.title() if text.isupper() else text
+        else:
+            continue
+        title = _clean_title(title)
+        key = title.lower()
+        if key in seen:  # running headers repeat on every page
+            continue
+        seen.add(key)
+        entries.append(OutlineEntry(level, title, line.page, line.y / line.height if line.height else 0.0))
+        if key in END_SECTIONS or len(entries) >= MAX_OUTLINE_ENTRIES:
+            break
+    return entries
+
+
+def extract_outline(data: bytes) -> list[OutlineEntry]:
+    """The paper's sections, from its bookmarks if it has them, else from its headings."""
+    try:
+        doc = pymupdf.open(stream=data, filetype="pdf")
+    except Exception as exc:
+        raise PdfError("The file could not be read as a PDF.") from exc
+    with doc:
+        bookmarks = _outline_from_bookmarks(doc)
+        return bookmarks if len(bookmarks) >= 3 else _outline_from_headings(doc)
+
+
+LEADING_NUMBER_RE = re.compile(r"^\s*\d{1,2}(?:\.\d{1,2}){0,2}\.?\s+")
+
+
+def locate_headings(data: bytes, titles: list[str]) -> list[tuple[int, float] | None]:
+    """(page, top) of each heading, searching forward through the document in order.
+
+    Compares ligature-normalized, case-folded text without spaces, punctuation, or
+    a leading section number. For each title the best match wins: a heading line
+    (bold or larger than body text) equal to the title, then one starting with it,
+    then a mention inside running text.
+    """
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    with doc:
+        sizes: Counter = Counter()
+        pages = [_page_lines(doc[pno], pno, sizes) for pno in range(doc.page_count)]
+        body = sizes.most_common(1)[0][0] if sizes else 10.0
+        keyed = [
+            [(_squash(LEADING_NUMBER_RE.sub("", line.text)), line) for line in page] for page in pages
+        ]
+
+        found: list[tuple[int, float] | None] = []
+        start = 0
+        for title in titles:
+            target = _squash(LEADING_NUMBER_RE.sub("", title))
+            best: dict[int, tuple[int, float]] = {}  # rank -> first spot with that rank
+            if len(target) >= 3:
+                for pno in range(start, len(pages)):
+                    for text, line in keyed[pno]:
+                        heading = line.bold or line.size >= body + 0.8
+                        rank = (0 if heading and text == target
+                                else 1 if heading and text.startswith(target)
+                                else 2 if target in text else None)
+                        if rank is not None and rank not in best:
+                            best[rank] = (pno, line.y / line.height if line.height else 0.0)
+                    if 0 in best:
+                        break
+            hit = best[min(best)] if best else None
+            if hit:
+                start = hit[0]
+                found.append((hit[0] + 1, hit[1]))
+            else:
+                found.append(None)
+        return found

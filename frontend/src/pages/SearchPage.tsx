@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { errorMessage, getSavedKeys, searchPapers } from '../api'
+import { errorMessage, getSavedKeys, openPaper, searchPapers } from '../api'
 import PaperCard from '../components/PaperCard'
 import SaveButton from '../components/SaveButton'
 import { paperKey, sourceKey, SOURCE_LABEL, type PaperMeta, type SearchSource } from '../types'
@@ -26,7 +26,7 @@ interface SearchState {
 
 const EMPTY: SearchState = {
   query: '',
-  source: 'arxiv',
+  source: 'openalex',
   results: [],
   page: 0,
   total: null,
@@ -79,6 +79,21 @@ export default function SearchPage() {
       cancelled = true
     }
   }, [])
+
+  // Open a result in the reader (without saving it); the PDF is fetched there.
+  const [opening, setOpening] = useState<string | null>(null)
+  async function read(paper: PaperMeta) {
+    if (opening) return
+    setOpening(paperKey(paper))
+    try {
+      const opened = await openPaper(paper)
+      window.location.assign(`#/paper/${opened.id}`)
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setOpening(null)
+    }
+  }
 
   function markSaved(paper: PaperMeta, id: number) {
     setSaved((prev) => new Map(prev).set(paperKey(paper), id))
@@ -156,19 +171,39 @@ export default function SearchPage() {
           onChange={(e) => setSource(e.target.value as SearchSource)}
           aria-label="Search source"
         >
-          <option value="arxiv">{SOURCE_LABEL.arxiv}</option>
           <option value="openalex">{SOURCE_LABEL.openalex}</option>
+          <option value="arxiv">{SOURCE_LABEL.arxiv}</option>
         </select>
         <button className="btn primary" type="submit" disabled={loading || !input.trim()}>
           {loading ? 'Searching…' : 'Search'}
         </button>
       </form>
       <p className="hint muted">
-        arXiv results always include a PDF, so the assistant can read the full paper. OpenAlex covers
-        all publishers, but full text is only available for open-access papers.
+        OpenAlex covers all publishers (including arXiv) and is fast; the assistant can read the full
+        paper when it is open access, and you can attach a PDF otherwise. arXiv results always include
+        the PDF.
       </p>
 
-      {error && <div className="alert error">{error}</div>}
+      {error && (
+        <div className="alert error">
+          {error}
+          {source === 'arxiv' && input.trim() && (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => {
+                  setSource('openalex')
+                  run(input.trim(), 'openalex', 1)
+                }}
+              >
+                Search OpenAlex instead
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {!state.searched && !loading && (
         <div className="empty">
@@ -198,12 +233,23 @@ export default function SearchPage() {
           <PaperCard
             key={paperKey(paper)}
             paper={paper}
+            onOpen={() => read(paper)}
             actions={
-              <SaveButton
-                paper={paper}
-                savedId={saved.get(paperKey(paper))}
-                onSaved={(id) => markSaved(paper, id)}
-              />
+              <>
+                <button
+                  className="btn small primary"
+                  onClick={() => read(paper)}
+                  disabled={opening !== null}
+                  title="Open in the reader: PDF, sections, and Q&A"
+                >
+                  {opening === paperKey(paper) ? 'Opening…' : 'Read'}
+                </button>
+                <SaveButton
+                  paper={paper}
+                  savedId={saved.get(paperKey(paper))}
+                  onSaved={(id) => markSaved(paper, id)}
+                />
+              </>
             }
           />
         ))}

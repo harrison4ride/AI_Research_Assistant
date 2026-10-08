@@ -2,9 +2,12 @@
 
 import asyncio
 import hashlib
+import ipaddress
 import logging
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from fastapi.concurrency import run_in_threadpool
@@ -25,7 +28,7 @@ _locks: dict[int, tuple[asyncio.Lock, int]] = {}
 
 
 @asynccontextmanager
-async def _paper_lock(paper_id: int) -> AsyncIterator[None]:
+async def paper_lock(paper_id: int) -> AsyncIterator[None]:
     lock, users = _locks.get(paper_id, (asyncio.Lock(), 0))
     _locks[paper_id] = (lock, users + 1)
     try:
@@ -41,6 +44,35 @@ async def _paper_lock(paper_id: int) -> AsyncIterator[None]:
 
 class TooLarge(Exception):
     pass
+
+
+class UnsafeUrl(Exception):
+    pass
+
+
+MAX_REDIRECTS = 5
+
+
+async def _check_public(url: str) -> str:
+    """Refuse anything but http(s) to public addresses; return the vetted IP.
+
+    PDF links come from search metadata, so without this a link (or a redirect)
+    could make the backend send requests to localhost or the local network. The
+    caller connects to the returned IP, so a second DNS answer (DNS rebinding)
+    cannot swap in a private address.
+    """
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise UnsafeUrl
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(parts.hostname, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise httpx.ConnectError(f"Could not resolve {parts.hostname}") from exc
+    addresses = [ipaddress.ip_address(info[4][0].split("%")[0]) for info in infos]
+    if not addresses or not all(address.is_global for address in addresses):
+        raise UnsafeUrl
+    return str(addresses[0])
 
 
 def looks_like_pdf(data: bytes) -> bool:
@@ -84,6 +116,11 @@ async def attach_pdf(paper: Paper, data: bytes, extracted: pdf.ExtractedPdf, db:
     paper.page_count = extracted.page_count
     paper.full_text_status = "ok"
     paper.full_text_error = None
+    if new_path != old_path:
+        # A different PDF means a different section structure: read it again on next view.
+        paper.outline = None
+        paper.outline_model = None
+        paper.outline_summarized_at = None
     try:
         db.commit()
     except StaleDataError:
@@ -96,15 +133,29 @@ async def attach_pdf(paper: Paper, data: bytes, extracted: pdf.ExtractedPdf, db:
 
 async def _download(url: str) -> bytes:
     limit = get_settings().max_pdf_mb * 1024 * 1024
-    async with get_client().stream("GET", url, timeout=60.0) as resp:
-        resp.raise_for_status()
-        chunks, size = [], 0
-        async for chunk in resp.aiter_bytes():
-            size += len(chunk)
-            if size > limit:
-                raise TooLarge
-            chunks.append(chunk)
-    return b"".join(chunks)
+    # Follow redirects by hand so every hop gets the same address check.
+    for _ in range(MAX_REDIRECTS + 1):
+        ip = await _check_public(url)
+        target = httpx.URL(url)
+        pinned = target.copy_with(host=ip)
+        host_header = target.host if target.port is None else f"{target.host}:{target.port}"
+        async with get_client().stream(
+            "GET", pinned, timeout=60.0, follow_redirects=False,
+            # Keep the real name for the Host header and TLS (SNI and certificate check).
+            headers={"Host": host_header}, extensions={"sni_hostname": target.host},
+        ) as resp:
+            if resp.is_redirect and "location" in resp.headers:
+                url = urljoin(url, resp.headers["location"])
+                continue
+            resp.raise_for_status()
+            chunks, size = [], 0
+            async for chunk in resp.aiter_bytes():
+                size += len(chunk)
+                if size > limit:
+                    raise TooLarge
+                chunks.append(chunk)
+            return b"".join(chunks)
+    raise httpx.TooManyRedirects("Too many redirects", request=None)
 
 
 def _still_exists(paper_id: int, db: Session) -> bool:
@@ -120,7 +171,7 @@ async def ensure_full_text(paper: Paper, db: Session, retry: bool = False) -> bo
     False if the paper was deleted in the meantime.
     """
     paper_id = paper.id
-    async with _paper_lock(paper_id):
+    async with paper_lock(paper_id):
         if not _still_exists(paper_id, db):
             return False
         db.refresh(paper)
@@ -139,6 +190,8 @@ async def ensure_full_text(paper: Paper, db: Session, retry: bool = False) -> bo
                     error = "The PDF link led to a web page instead of a PDF file."
                 else:
                     extracted = await run_in_threadpool(pdf.extract, data)
+            except UnsafeUrl:
+                error = "The PDF link points to a local or private address, so it was not downloaded."
             except TooLarge:
                 error = f"The PDF is larger than {get_settings().max_pdf_mb} MB."
             except httpx.HTTPStatusError as exc:

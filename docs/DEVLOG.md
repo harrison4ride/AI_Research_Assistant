@@ -371,6 +371,80 @@ Code even when it was logged out (now gated on the status, 45 s limit); an expor
 for the child); a finished answer waited up to ~9 s for the CLI to exit (shutdown now
 runs in the background); a stale `/config` response could overwrite a newer one.
 
+## M6: Reader, Section Outline, Model Menu
+
+**Request:** the user pointed out that questions could only be asked about saved
+papers, and asked for clicking a search result to open an in-app page with the PDF,
+the paper's structure with one-sentence summaries on the left, and Q&A on the right;
+then for switching models. The user chose section summaries **on click** (not
+automatic) and the **same reader for library papers**.
+
+**Built:**
+- Papers opened from search are stored as unsaved (`in_library = false`), so Q&A
+  works at once; saving keeps the chat and outline. Unsaved papers not opened for
+  `CACHED_PAPER_DAYS` are pruned (at startup and every 12 hours).
+- The section outline comes from PDF bookmarks or detected headings (including
+  ACL-style split numbers). "Summarize sections" asks the model for one sentence each.
+- The 3-column reader uses react-pdf (lazy-loaded), with section jumps and an
+  active-section highlight.
+- A model menu (Opus, Sonnet, Haiku, Fable, Claude Code default; or the API models)
+  is validated server-side before anything reaches the CLI or API.
+- OpenAlex became the default search source.
+
+**Mid-milestone discussion: arXiv.** Searches started failing with 429 and 503
+after a day of tests and verification agents had all queried arXiv from one IP
+address (each backend process has its own 3 s throttle). arXiv's status page showed
+the API up, so the limit was per-IP. The user asked about Google Scholar instead.
+It has no API, its `robots.txt` disallows `/scholar`, and it shows snippets instead of
+abstracts, so OpenAlex (0.35 s, official API) became the default. The app also got
+an arXiv cooldown that honors `Retry-After`, a 10-minute search cache, and a
+"Search OpenAlex instead" button.
+
+**Verification workflow (4 auditors + 4 skeptics, fake CLI):** 43 findings, all
+confirmed. The most significant:
+
+| Confirmed problem | Fix |
+|-------------------|-----|
+| react-pdf's default Suspense mode hid the whole viewer whenever a page loaded, and a PDF load error **blanked the entire app** | `suspense={false}` on Document and Page, plus an error boundary around the lazy viewer |
+| Page offsets were measured from `<body>`, not the PDF scroller, so jumps overshot by ~180 px and the highlight lagged | `.pdf-scroll` is positioned; offsets are now relative to it |
+| Bookmark positions came out mirrored for explicit (non-LaTeX) destinations, and `/Fit` jumped to the page bottom | Positions read according to the destination kind |
+| A model reply that skipped one section shifted every later summary onto the wrong heading | Summaries keyed by section number; incomplete replies are rejected, keeping the old ones |
+| Section titles from untrusted PDFs went into the prompt as the user's own words | Passed as a JSON data block marked as paper content; titles and outline size capped |
+| A PDF link (or redirect) could make the backend request localhost or LAN addresses | Only http(s) to public addresses, re-checked on every redirect |
+| Model-named headings with "fi"/"fl" ligatures were never located; the paper title matched before the real heading | Ligature-normalized, number-stripped matching ranked heading > prefix > mention |
+| Outline extraction was O(n²) and bookmark lists unbounded (a crafted PDF yielded a 31 MB outline) | Per-page joining; at most 120 entries and 200 characters per title; outline column deferred |
+| A PDF replaced, or the paper deleted, during a minutes-long summary call gave stale data or a 500 | Re-check after the call (404 or 409); per-paper lock for outline extraction |
+| "Saved" date and library order used the first-opened time | New `saved_at` column (backfilled) |
+| The layout broke between 1100 and 1250 px; a section click in the stacked layout scrolled off-screen; zoom lost the reading place; "Back" after a direct load left the app | All fixed |
+| Docs: pruning only ran at startup, Node message blamed Vite, model and verification wording outdated | Fixed |
+
+**Agent mistakes found while fixing (test-confirmed):** the first version of
+`locate_headings` matched the paper's own title on page 1 before the numbered heading;
+and after the reading-position fix, a leftover 0.02-page tolerance still highlighted
+"4.1" right after jumping to "4 Experiments". Both were found by re-running the UI
+check after the fix rather than assuming it worked.
+
+**`/code-review high` after the workflow fixes (10 findings), all fixed:**
+
+| # | Finding | Fix |
+|---|---------|-----|
+| 1 | Pruning selected stale unsaved papers, then deleted them by id: a paper saved or reopened in between was still deleted | The DELETE repeats the staleness conditions; the PDF is removed only if a row was deleted (tested by reopening a paper between select and delete) |
+| 2 | The address check resolved the PDF host, then httpx resolved it again, so a DNS answer that changed in between (rebinding) could still reach a private address | The download connects to the vetted IP, with the original `Host` header and TLS server name |
+| 3 | Searches queued behind arXiv's 3 s throttle sent their request even after the one before them had started a cooldown | The cooldown is re-checked after acquiring the throttle lock (3 concurrent searches during a 429 now make 1 call) |
+| 4 | The search cache lowercased queries, but OpenAlex treats uppercase `AND`/`OR`/`NOT` as operators | Case preserved; only whitespace is collapsed |
+| 5 | "Back" counted hash changes, so after a reload, or after browser back and forward, it could leave the app | Each history entry stores its depth in `history.state`, which survives reloads and back/forward |
+| 6 | Every scroll event re-rendered the whole reader, including the PDF and the chat | Position updates at most once per frame and only on change; the viewer, chat, and summary panels are memoized |
+| 7 | Rendered PDF pages were never released, so a long paper kept every page canvas in memory | Only pages near the viewport keep a canvas (4 of 12 at the end of ResNet); unloaded pages keep their measured height, so scrolling does not jump |
+| 8 | The outline-summary request read the whole PDF before the minutes-long model call and held it in memory | The PDF is read after the call, when headings are located |
+| 9 | A failed outline load left its error on screen after a later load succeeded | Cleared on success |
+| 10 | While a paper loaded, the top navigation kept the previous paper's Search/Library state | The state is tied to the paper id; no tab is marked until the paper loads |
+
+**Tests after the fixes:** the reader, section-jump, and navigation UI checks in
+headless Chrome (fake Claude CLI, isolated port and data folder) and a backend
+script covering open-without-save, model validation, outline summaries,
+pruning under a race, the search cache key, and the arXiv cooldown race all passed,
+with no browser console errors.
+
 ## Summary Across Milestones
 
 | Milestone | Review findings | Fixed | Documented, not changed |
@@ -383,6 +457,7 @@ runs in the background); a stale `/config` response could overwrite a newer one.
 | M5 Deployment | 10 | 9 | 1 (Docker quoting; Docker later removed) |
 | M5 follow-up (setup script) | 29 confirmed by workflow + 9 from `/code-review` | 38 | 0 |
 | Follow-up: Claude Code provider | 26 confirmed by workflow + 9 from `/code-review` | 35 | 0 |
+| M6 Reader and model menu | 43 confirmed by workflow + 10 from `/code-review` | 53 | 0 |
 
 Recurring pattern: the first implementation of each milestone passed its
 happy-path test. The review then found problems on unusual inputs (Unicode,

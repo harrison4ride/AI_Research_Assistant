@@ -38,7 +38,7 @@ export default function SaveButton({ paper, savedId, onSaved }: Props) {
 
   return (
     <span className="save-wrap">
-      <button className="btn small primary" onClick={save} disabled={saving}>
+      <button className="btn small" onClick={save} disabled={saving}>
         {saving ? 'Saving…' : 'Save to library'}
       </button>
       {error && (

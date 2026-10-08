@@ -3,6 +3,8 @@ import { attachPdf, errorMessage, fetchFullText } from '../api'
 import { fullTextFields, type FullTextFields, type Paper } from '../types'
 
 interface Props {
+  // Render nothing once the full text is available (the reader shows the PDF instead).
+  quietWhenOk?: boolean
   paper: Paper
   // Receives only the full-text fields, so a slow download can't overwrite
   // metadata the user edited while it was running.
@@ -10,7 +12,7 @@ interface Props {
 }
 
 // Shows whether the assistant can read the whole paper, fetching the PDF on first view.
-export default function FullTextStatus({ paper, onChange }: Props) {
+export default function FullTextStatus({ paper, onChange, quietWhenOk = false }: Props) {
   // Start busy when a fetch is about to run, so the first frame isn't an empty error box.
   const [busy, setBusy] = useState<string | null>(
     paper.full_text_status === null ? 'Downloading and reading the PDF…' : null,
@@ -76,6 +78,7 @@ export default function FullTextStatus({ paper, onChange }: Props) {
     )
   }
   if (status === 'ok') {
+    if (quietWhenOk) return null
     return (
       <div className="status-box ok">
         ✓ Full text available{paper.page_count ? ` (${paper.page_count} pages)` : ''}. The assistant

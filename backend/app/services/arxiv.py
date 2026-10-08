@@ -99,6 +99,9 @@ async def _fetch(params: dict) -> httpx.Response:
     """Serialize arXiv calls and keep 3 s between the end of one and the start of the next."""
     global _last_finished
     async with _rate_lock:
+        # A request that failed while this one waited may have started a cooldown.
+        if time.monotonic() < _cooldown_until:
+            raise _cooldown_error()
         wait = _MIN_INTERVAL - (time.monotonic() - _last_finished)
         if wait > 0:
             await asyncio.sleep(wait)
@@ -108,15 +111,46 @@ async def _fetch(params: dict) -> httpx.Response:
             _last_finished = time.monotonic()
 
 
+# After arXiv refuses or stalls, stop calling it for a while instead of making
+# every search wait for the same failure (arXiv counts all calls from one IP).
+_cooldown_until = 0.0
+MIN_COOLDOWN, MAX_COOLDOWN = 60.0, 600.0
+
+
+def _start_cooldown(retry_after: str | None = None) -> None:
+    global _cooldown_until
+    seconds = MIN_COOLDOWN
+    if retry_after and retry_after.strip().isdigit():
+        seconds = min(max(float(retry_after), MIN_COOLDOWN), MAX_COOLDOWN)
+    _cooldown_until = time.monotonic() + seconds
+
+
+def _cooldown_error() -> UpstreamError:
+    wait = max(1, round(_cooldown_until - time.monotonic()))
+    return UpstreamError(
+        f"arXiv is limiting requests right now, so it is paused for about {wait} s. Search OpenAlex meanwhile.",
+        429,
+    )
+
+
 async def _query(params: dict) -> ET.Element:
     """Run one arXiv API call and return the parsed feed, raising UpstreamError on failure."""
+    if time.monotonic() < _cooldown_until:
+        raise _cooldown_error()
     try:
         resp = await _fetch(params)
     except httpx.TimeoutException as exc:
-        raise UpstreamError("arXiv timed out, please try again.", 504) from exc
+        _start_cooldown()
+        raise UpstreamError(
+            "arXiv did not answer in time (it may be limiting requests). Try again in a minute, or search OpenAlex.",
+            504,
+        ) from exc
     except httpx.HTTPError as exc:
         log.warning("arXiv request failed: %r", exc)
         raise UpstreamError("Could not reach arXiv. Check your connection and try again.") from exc
+    if resp.status_code in (429, 503):
+        _start_cooldown(resp.headers.get("retry-after"))
+        raise _cooldown_error()
     if resp.status_code != 200:
         raise UpstreamError(f"arXiv returned HTTP {resp.status_code}.")
     try:

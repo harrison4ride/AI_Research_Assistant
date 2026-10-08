@@ -19,7 +19,7 @@ set -euo pipefail
 ROOT="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 ENV_FILE="$ROOT/.env"
 VENV_PY="$ROOT/backend/.venv/bin/python"
-NODE_REQUIREMENT="20.19+ (20.x) or 22.12+"
+NODE_REQUIREMENT="22.13 or later"
 NODE_HELP="Install Node.js 22 LTS from https://nodejs.org, or run: brew install node (or: nvm install 22)"
 
 usage() {
@@ -56,15 +56,15 @@ confirm() {
   case "$reply" in [yY] | [yY][eE][sS]) return 0 ;; *) return 1 ;; esac
 }
 
-# True if a Node.js version like "22.22.0" satisfies ^20.19.0 || >=22.12.0 (Vite 8's range).
+# True if a Node.js version like "22.22.0" is 22.13 or later (PDF.js 6 needs
+# >=22.13; Vite 8 alone would accept ^20.19 || >=22.12).
 node_version_ok() {
   local major minor
   major="${1%%.*}"
   minor=0
   case "$1" in *.*) minor="${1#*.}"; minor="${minor%%.*}" ;; esac
   case "$major$minor" in *[!0-9]*) return 1 ;; esac
-  if [ "$major" -eq 20 ]; then [ "$minor" -ge 19 ]; return; fi
-  if [ "$major" -eq 22 ]; then [ "$minor" -ge 12 ]; return; fi
+  if [ "$major" -eq 22 ]; then [ "$minor" -ge 13 ]; return; fi
   [ "$major" -gt 22 ]
 }
 
@@ -148,7 +148,7 @@ elif node_version="$(node --version 2>/dev/null)" && [ -n "$node_version" ]; the
   if node_version_ok "$node_version"; then
     ok "Node.js $node_version"
   else
-    fail "Node.js $node_version is not supported; Vite needs $NODE_REQUIREMENT. $NODE_HELP"
+    fail "Node.js $node_version is not supported; the frontend (PDF.js 6) needs $NODE_REQUIREMENT. $NODE_HELP"
     missing=1
   fi
 else

@@ -15,15 +15,35 @@ code-review finding and its fix, is in [docs/DEVLOG.md](docs/DEVLOG.md).
 
 | # | Feature | What it does |
 |---|---------|--------------|
-| F1 | **Search papers** | Search by keywords or topic on **arXiv** or **OpenAlex**. Each result shows title, authors, year, venue, abstract, and links to the paper page and PDF. "Load more" pages through results. |
+| F1 | **Search papers** | Search by keywords or topic on **OpenAlex** (the default: fast, all publishers, including arXiv) or **arXiv**. Each result shows title, authors, year, venue, abstract, and links to the paper page and PDF. "Load more" pages through results. |
 | F2 | **Local library** | Save any result with one click. Papers live in a local SQLite database, so they survive page refreshes and restarts. The Library page lists, filters (by title, author, or abstract), opens, and removes papers. Saving the same paper from both sources keeps one entry when their DOI or arXiv id matches. |
 | F3 | **PDF upload** | Upload a PDF (button or drag and drop). The app extracts the full text and the **title, authors, year, and abstract**, and shows the paper like a search result. Metadata comes from arXiv when the PDF carries an arXiv id, otherwise from Claude reading the first pages, otherwise from layout heuristics. You can correct any field with "Edit details". |
 | F4 | **Summaries** | "Generate summary" streams a structured summary (TL;DR, problem, approach, key results, setup, limitations) written from the paper's **full text**. Summaries are saved and show which model wrote them and whether the full text or only the abstract was available. |
 | F5 | **Questions and answers** | Ask anything about the selected paper, or click one of the example questions (problem, main idea, datasets, limitations, baselines). Answers stream in, cite sections where possible, and the conversation is saved per paper. |
 
-Full text is always available for arXiv papers and uploads. Saved papers download their
-open-access PDF the first time you open them. When no PDF can be found (common for
-paywalled OpenAlex results), the app says so, falls back to the abstract, and offers an
+**The reader.** Clicking a search result (or a library paper) opens it in a
+three-column reader, without saving it first:
+
+- **Left:** the paper's sections, read from its PDF bookmarks or headings, with page
+  numbers. Click one to jump to it in the PDF; **Summarize sections** adds a
+  one-sentence summary to each. The full summary (F4) and the paper's details are in
+  the other two tabs.
+- **Center:** the PDF itself, rendered in the page (PDF.js), with zoom.
+- **Right:** questions and answers (F5).
+- **Header:** **Save to library**, and a **model menu** that applies to section
+  summaries, the summary, and answers: Opus, Sonnet, Haiku, Fable, or "Claude Code
+  default" in Claude Code mode, and the matching Claude API models in API mode. Each
+  result shows which model wrote it, and the choice is remembered in the browser.
+  `CLAUDE_CODE_MODEL` / `LLM_MODEL` set the menu's default (and the model that reads
+  uploaded PDFs' metadata).
+
+Papers opened from search but not saved stay out of the library, keep their
+conversation if you save them later, and are deleted once they have not been opened
+for `CACHED_PAPER_DAYS` (default 30); the backend checks at startup and every 12 hours.
+
+Full text is always available for arXiv papers and uploads. Other papers download their
+open-access PDF when you open them. When no PDF can be found (common for paywalled
+OpenAlex results), the app says so, falls back to the abstract, and offers an
 **Attach PDF** button.
 
 ## How It Works
@@ -102,7 +122,7 @@ Full requirements, version notes, and troubleshooting are in **[INSTALL.md](INST
 
 - **[uv](https://docs.astral.sh/uv/)** for Python. It uses an installed Python 3.11 or
   downloads one.
-- **Node.js 20.19+ (20.x) or 22.12+** (tested with 22.22) and npm.
+- **Node.js 22.13 or later** (tested with 22.22) and npm.
 - **For summaries and Q&A:** [Claude Code](https://claude.com/claude-code), installed
   and logged in (the default), or an Anthropic API key with `LLM_PROVIDER=api`. Search,
   the library, and PDF upload work without either.
@@ -156,16 +176,20 @@ limits, and where data is stored. See
 | Method and path | Description |
 |-----------------|-------------|
 | `GET /api/search?q=&source=arxiv\|openalex&page=&per_page=` | Search papers |
-| `GET /api/papers?q=` | List saved papers, optionally filtered |
-| `POST /api/papers` | Save a search result (returns the existing entry if already saved) |
+| `GET /api/papers?q=` | List the library's papers, optionally filtered |
+| `POST /api/papers` | Save a search result to the library (returns the existing entry if already there) |
+| `POST /api/papers/open` | Open a search result in the reader without saving it |
+| `POST /api/papers/{id}/save` | Add a paper that was only opened to the library |
 | `POST /api/papers/upload` | Upload a PDF (multipart field `file`) |
 | `GET / PATCH / DELETE /api/papers/{id}` | Get, edit metadata, or remove a paper |
 | `POST /api/papers/{id}/fulltext` | Download and extract the paper's open-access PDF |
 | `POST /api/papers/{id}/pdf` | Attach a PDF to an existing paper |
 | `GET /api/papers/{id}/pdf` | View the stored PDF |
-| `POST /api/papers/{id}/summary` | Stream a new summary (NDJSON) |
-| `GET / POST / DELETE /api/papers/{id}/chat` | Read, ask (streams NDJSON), or clear the Q&A history |
-| `GET /api/config` | LLM provider and model, whether summaries and Q&A can run, and how to fix it if not |
+| `GET /api/papers/{id}/outline` | The paper's sections (with summaries once generated) |
+| `POST /api/papers/{id}/outline/summaries` | Write one-sentence section summaries (body: `{"model"}`) |
+| `POST /api/papers/{id}/summary?model=` | Stream a new summary (NDJSON) |
+| `GET / POST / DELETE /api/papers/{id}/chat` | Read, ask (body: `{"question", "model"}`; streams NDJSON), or clear the Q&A history |
+| `GET /api/config` | LLM provider, the model menu and default, whether summaries and Q&A can run, and how to fix it if not |
 
 Interactive API docs are at <http://localhost:8000/docs> while the backend runs.
 
@@ -188,13 +212,15 @@ Interactive API docs are at <http://localhost:8000/docs> while the backend runs.
 - Scanned PDFs without a text layer are rejected; there is no OCR.
 - Text extraction ignores figures, and tables come through as plain text.
 - OpenAlex sometimes has no abstract, or a garbled one, for a work. That is upstream data.
-- arXiv asks clients to wait 3 seconds between API calls, so back-to-back arXiv
-  searches are spaced out.
+- arXiv asks clients to wait 3 seconds between API calls and rate-limits everything
+  from one IP address. When it refuses or stalls, the app pauses arXiv searches for a
+  minute or more (as long as arXiv asks), says so right away, and offers a one-click
+  OpenAlex search. Repeated searches within 10 minutes reuse earlier results.
 - There are no automated tests yet (HW2 adds them).
 
 ## Development Process
 
-The app was built in six milestones (M0 to M5, see [docs/PLAN.md](docs/PLAN.md)). After
+The app was built in seven milestones (M0 to M6, see [docs/PLAN.md](docs/PLAN.md)). After
 each milestone, Claude Code's `/code-review` ran on the uncommitted changes; every
 finding was fixed or explicitly decided on before that milestone's commit.
 [docs/DEVLOG.md](docs/DEVLOG.md) records what each review found, and
