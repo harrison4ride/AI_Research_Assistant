@@ -207,7 +207,7 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
     if [ "$LLM_READY" = "yes" ]; then
       ok "Summaries and Q&A ready: $LLM_LABEL"
     else
-      warn "Summaries and Q&A unavailable (search, library, and upload still work). ${LLM_HINT:-Could not check the language model.}"
+      warn "Summaries and Q&A unavailable (search, library, upload, and the reader's PDF and section outline still work). ${LLM_HINT:-Could not check the language model.}"
     fi
   fi
   echo
@@ -264,7 +264,7 @@ if [ "$LLM_PROVIDER" = "claude-code" ]; then
   if [ "$LLM_READY" = "yes" ]; then
     ok "Using $LLM_LABEL with your Claude Code login (no API key needed)"
   else
-    warn "${LLM_HINT:-Could not check Claude Code.} Search, library, and upload work without it."
+    warn "${LLM_HINT:-Could not check Claude Code.} Search, library, upload, and the reader (PDF and section outline) work without it."
   fi
 elif [ "$LLM_PROVIDER" = "api" ] && credentials_found; then
   ok "Using the Anthropic API ($LLM_LABEL); credentials found"
@@ -276,9 +276,9 @@ elif [ "$LLM_PROVIDER" = "api" ]; then
     echo
   fi
   if [ -z "$api_key" ]; then
-    warn "No API key set. Search, library, and upload work; to enable summaries and Q&A, set ANTHROPIC_API_KEY in .env, or use LLM_PROVIDER=claude-code."
+    warn "No API key set. Search, library, upload, and the reader (PDF and section outline) still work. To enable summaries and Q&A, set ANTHROPIC_API_KEY in .env or use LLM_PROVIDER=claude-code."
   elif ! printf '%s' "$api_key" | grep -Eq '^[A-Za-z0-9_-]+$'; then
-    warn "That doesn't look like an API key (expected letters, digits, - and _). Nothing was saved; edit .env by hand."
+    warn "That does not look like an API key (expected letters, digits, - and _). Nothing was saved. Edit .env by hand."
   else
     # python-dotenv (the library the app reads .env with) updates the existing
     # ANTHROPIC_API_KEY line in any form it accepts, or adds one. The key is

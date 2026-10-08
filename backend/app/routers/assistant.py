@@ -124,6 +124,7 @@ async def app_config() -> AppConfig:
         llm_hint=hint,
         llm_models=model_options(),
         llm_default_model=default_model(),
+        cached_paper_days=get_settings().cached_paper_days,
     )
 
 

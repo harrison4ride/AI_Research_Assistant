@@ -1,10 +1,10 @@
-# Development log
+# Development Log
 
-A per-milestone record of what the coding agent (Claude Code) built, what the
-`/code-review` pass found, and what was changed in response. Raw material for the
-reflection report.
+A record of each milestone and follow-up: what the coding agent (Claude Code)
+built, what `/code-review` and any verification workflow found, and what the agent
+changed in response. It is raw material for the reflection report.
 
-## M0 — Scaffold
+## M0: Scaffold
 
 **Built:** requirements/plan docs; FastAPI backend skeleton (uv, Python 3.11) with
 `/api/health`; React + Vite + TS frontend with hash router, app shell, and dev proxy
@@ -25,7 +25,7 @@ reflection report.
 | 9 | Unused `navigate` export | Removed |
 
 **Takeaway:** the agent's first-pass scaffold was functional but the review caught a
-real secret-leak risk (#1) that the scaffold step didn't consider.
+real secret-leak risk (#1) that the scaffold step did not consider.
 
 ## M1: Paper Search (F1)
 
@@ -65,7 +65,7 @@ happy-path manual test did not reveal. Both only show up on unusual inputs.
 `GET/POST /api/papers`, `GET/DELETE /api/papers/{id}`, `GET /api/papers/keys`;
 per-result "Save to library" button with saved state; Library page with filter,
 open, and remove; paper detail page. A small `init_db` helper adds new nullable
-columns so later milestones don't require deleting the database.
+columns so later milestones do not require deleting the database.
 
 **Verified:** the Playwright script saved 2 papers, reloaded the page, filtered,
 restarted the backend (data persisted), opened a detail page, deleted a paper,
@@ -89,7 +89,7 @@ effect on the detail page. The fix remounts the page per paper id with `key`.
 | 9 | Saved-key format duplicated by hand | Fixed: shared `sourceKey()` |
 | 10 | `err instanceof Error ? …` copied 6 times | Fixed: `errorMessage()` helper |
 
-**Takeaway:** findings 1–3 are SQLite-specific behaviors (timezone and
+**Takeaway:** findings 1-3 are SQLite-specific behaviors (timezone and
 ASCII-only `lower()`) that look correct in a quick English-only test. The
 reviewer reproduced each one against a scratch database before reporting it.
 
@@ -111,7 +111,7 @@ panel, and metadata edit form.
 - LoRA's small-caps title had no spaces in the PDF text layer ("LORA:LOW-RANKADAPTATION…").
   The arXiv lookup fixes this case.
 
-**Test-script bug (mine, not the app's):** Playwright's `text=Open` selector
+**Agent mistake in a test script:** Playwright's `text=Open` selector
 matched the "OpenAlex" badge, so the test never navigated. Opening the page
 directly and tracing network calls showed the app was fine.
 
@@ -204,7 +204,7 @@ The README says so.
 | # | Finding | Action |
 |---|---------|--------|
 | 1 | `docker run --env-file .env` lets a local `DATA_DIR` move data out of the volume | Fixed: README passes `-e DATA_DIR=/data` |
-| 2 | My `/api/{path}` catch-all turned 405s into 404s and broke trailing-slash redirects | Fixed: removed it; serve `/`, `/favicon.svg`, and mount only `/assets` |
+| 2 | The agent's `/api/{path}` catch-all turned 405s into 404s and broke trailing-slash redirects | Fixed: removed it; serve `/`, `/favicon.svg`, and mount only `/assets` |
 | 3 | `trap 'kill 0'` in `make dev` signals the whole process group | Fixed (see below) |
 | 4 | `index.html` could be browser-cached after a rebuild, pointing at deleted asset hashes | Fixed: `Cache-Control: no-cache` on `/` |
 | 5 | Docker `--env-file` keeps quotes, so a quoted key breaks auth in the container | Documented in the README |
@@ -258,7 +258,7 @@ tried to refute every finding. 31 findings, 29 confirmed, 2 uncertain.
 |-------------------|-----|
 | Code blocks had trailing `# comments`. macOS's interactive zsh does not treat `#` as a comment, so pasting failed, and in the Uninstall block the comment words became extra `rm -rf` arguments | No inline comments in any code block; explanations moved to prose |
 | `brew install node@22` (keg-only) does not put `node` on PATH, so setup kept failing | Recommend `brew install node` or nvm; explain `node@22` linking |
-| Troubleshooting blamed "lockfile needs updating" on an old uv; the real cause is an edited `pyproject.toml` (tested uv 0.3.5–0.11.17) | Split into two accurate rows |
+| Troubleshooting blamed "lockfile needs updating" on an old uv; the real cause is an edited `pyproject.toml` (tested uv 0.3.5 to 0.11.17) | Split into two accurate rows |
 | Vite silently moved to port 5174 when 5173 was busy, so the documented URL reached another app | `strictPort: true`; Vite now fails with "Port 5173 is already in use" |
 | A broken `node`/`npm`/`uv` aborted the script under `set -e` or passed as "✓ npm " | Guarded version probes with clear messages |
 | Key detection hand-parsed `.env` and misread CRLF, `export`, spaces around `=`, and inline comments; the prompt could append a duplicate key line | Ask the app's own settings loader; save with `python-dotenv` (now a direct dependency) |
@@ -292,6 +292,36 @@ in the terminal and SIGTERM both stop it; the docs say to use Ctrl+C).
 errors (keg-only Homebrew formulas, zsh comment handling, Vite's port fallback,
 uv's Python preference) were only caught because the agents actually ran the
 steps instead of reading them.
+
+## Fix: "The Page Won't Open" (User Report)
+
+**Report:** after running the setup script, the user could not open the app.
+
+**Diagnosis:** nothing was listening on ports 8000 or 5173, so the servers were
+not running. Starting `make dev` showed two more problems in headless Chrome:
+
+- Vite bound only the IPv6 loopback `[::1]:5173` (its default `localhost` host on
+  macOS), while the backend bound only IPv4 `127.0.0.1:8000`. So
+  <http://127.0.0.1:5173> was refused, even though <http://localhost:5173> worked.
+- In development mode, <http://localhost:8000> returned a bare JSON 404, which
+  looks like a broken app.
+
+**Fix:** Vite now binds `127.0.0.1`, like the backend, and port 8000 shows a page
+that explains where the app is. INSTALL.md gained two troubleshooting rows.
+
+**`/code-review high` findings (6) and resolution:**
+
+| # | Finding | Action |
+|---|---------|--------|
+| 1 | **Regression from this fix:** with Vite on `127.0.0.1`, `strictPort` no longer notices another program on `[::1]:5173`, and browsers would open *that* program at `localhost:5173` | Fixed: a Vite plugin probes `[::1]:5173` and refuses to start if it is taken (tested with a dummy listener) |
+| 2 | The "not built yet, run make start" hint was wrong when `FRONTEND_DIST` points elsewhere | Fixed: the hint names the checked directory and `FRONTEND_DIST` |
+| 3 | A `dist` folder without `index.html` or `assets/` crashed startup or returned 500 | Fixed: requires both; otherwise the hint page shows (tested with 4 bad folders) |
+| 4 | INSTALL.md row blamed development mode for every "API server" page | Fixed: covers both cases |
+| 5 | "Keep the terminal open... `make dev`" confused readers using two terminals | Fixed wording |
+| 6 | Dev URL markup duplicated | Fixed: one constant |
+
+**Takeaway:** the first fix for a networking bug introduced a subtler
+networking bug, and the review caught it before commit.
 
 ## Follow-Up: Claude Code as the Default LLM Provider
 
@@ -349,7 +379,7 @@ was also fixed.
 
 | Confirmed problem | Fix |
 |-------------------|-----|
-| Claude Code adds the user's **account email** and environment details (cwd, OS, shell, date) to every request; no flag removes it. Answers were rendered with remote images allowed, so a malicious PDF could try to make the model leak the email in an image URL | The UI never loads images from model output (rendered as text), a CSP `img-src 'self'` backs that up, and the prompt tells the model never to repeat account or environment details. Docs now state this limit instead of claiming a "plain text model" |
+| Claude Code adds the user's **account email** and environment details (cwd, OS, shell, date) to every request; no flag removes it. Answers were rendered with remote images allowed, so a malicious PDF could try to make the model leak the email in an image URL | The UI never loads images from model output (rendered as text), a CSP (`img-src 'self' data: blob:`) backs that up, and the prompt tells the model never to repeat account or environment details. Docs now state this limit instead of claiming a "plain text model" |
 | Chat history was flattened with plain `<user>`/`<assistant>` tags, so paper text quoted in an old answer could close the transcript and pose as the user's new question | Random per-request boundary tags; the transcript is marked as context only |
 | The read loop ended only at stdout EOF: a helper holding the pipe made a finished answer wait for the timeout, or be discarded | Stop at the `result` event; poll for the CLI's exit (asyncio's `wait()` also waits for pipes); then SIGTERM, then SIGKILL, for the whole process group |
 | macOS returns EPERM (not ESRCH) for a zombie-only process group, which masked cancellations | Handled |
@@ -359,17 +389,23 @@ was also fixed.
 | A wrong `CLAUDE_CODE_PATH` was reported as "not installed"; relative paths broke | Specific hint; relative paths anchored like `DATA_DIR` |
 | Docs and hints: "rechecks within 30 seconds" was false; `.env` hints omitted "restart the backend"; backticks shown literally | The page rechecks when you return to the tab; hints fixed; `code` rendered |
 
-**`/code-review high` after the workflow fixes (9 findings), all fixed:** an old CLI without
-`auth status --json` was reported as ready (the version is now checked first, and a
-non-zero exit means not ready); the metadata-extraction prompt lacked the
-untrusted-input and privacy rules; a model-written link with a query string could
-still carry data out on a click (now shown as text with the full URL); "not logged in"
-was cached for 10 s (now 3 s) and every tab focus could start two CLI processes (now
-only while unavailable, debounced, with one shared check); uploads waited on Claude
-Code even when it was logged out (now gated on the status, 45 s limit); an exported
-`ANTHROPIC_BASE_URL` would have routed the user's login to that endpoint (now removed
-for the child); a finished answer waited up to ~9 s for the CLI to exit (shutdown now
-runs in the background); a stale `/config` response could overwrite a newer one.
+**`/code-review high` after the workflow fixes (9 findings), all fixed:**
+
+| # | Finding | Fix |
+|---|---------|-----|
+| 1 | An old CLI without `auth status --json` was reported as ready | The version is checked first, and a non-zero exit means not ready |
+| 2 | The metadata-extraction prompt lacked the untrusted-input and privacy rules | Added both rules |
+| 3 | A model-written link with a query string could still carry data out on a click | Such links are shown as text with the full URL |
+| 4 | "Not logged in" was cached for 10 s | Cached for 3 s |
+| 5 | Every tab focus could start two CLI processes | The page rechecks only while the LLM is unavailable, at most once every 5 s, and concurrent requests share one status check |
+| 6 | Uploads waited on Claude Code even when it was logged out | Metadata extraction is skipped unless the status check says Claude Code is ready, with a 45 s limit |
+| 7 | An exported `ANTHROPIC_BASE_URL` would have routed the user's login to that endpoint | Removed from the child environment |
+| 8 | A finished answer waited up to ~9 s for the CLI to exit | Shutdown runs in the background |
+| 9 | A stale `/config` response could overwrite a newer one | Only the newest check's response is applied |
+
+**Takeaway:** reading the installed source overturned several assumptions based on
+the documentation. A fake `claude` script exposed failure paths, such as a helper
+process holding the output pipes, that the tiny real probes did not reach.
 
 ## M6: Reader, Section Outline, Model Menu
 
@@ -383,10 +419,15 @@ automatic) and the **same reader for library papers**.
 - Papers opened from search are stored as unsaved (`in_library = false`), so Q&A
   works at once; saving keeps the chat and outline. Unsaved papers not opened for
   `CACHED_PAPER_DAYS` are pruned (at startup and every 12 hours).
+- New endpoints: `POST /api/papers/open`, `POST /api/papers/{id}/save`,
+  `GET /api/papers/{id}/outline`, and `POST /api/papers/{id}/outline/summaries`.
 - The section outline comes from PDF bookmarks or detected headings (including
   ACL-style split numbers). "Summarize sections" asks the model for one sentence each.
-- The 3-column reader uses react-pdf (lazy-loaded), with section jumps and an
-  active-section highlight.
+- The 3-column reader has Sections, Summary, and Details tabs on the left, the PDF
+  in the center (react-pdf, lazy-loaded), and Q&A on the right. Clicking a section
+  jumps to it in the PDF, and the section being read is highlighted.
+- PDF.js 6 (used by react-pdf 11) needs Node.js 22.13 or later, so
+  `scripts/setup.sh` now checks for that version.
 - A model menu (Opus, Sonnet, Haiku, Fable, Claude Code default; or the API models)
   is validated server-side before anything reaches the CLI or API.
 - OpenAlex became the default search source.
@@ -445,6 +486,21 @@ script covering open-without-save, model validation, outline summaries,
 pruning under a race, the search cache key, and the arXiv cooldown race all passed,
 with no browser console errors.
 
+**Takeaway:** untrusted PDF content (bookmarks, section titles, links) caused several
+of the confirmed problems. Re-running the UI checks after each fix also caught two
+mistakes the agent made while fixing.
+
+## Follow-Up: Unsaved Papers Kept for 7 Days
+
+**Change:** the default of `CACHED_PAPER_DAYS` went from 30 to 7, so unsaved papers
+are deleted after 7 days without being opened. `GET /api/config` now also returns
+`cached_paper_days`, and the reader's Details tab uses it to say after how many days
+an unsaved paper is deleted.
+
+**Test:** on a scratch database with two unsaved papers, pruning deleted the one last
+opened 8 days ago and kept the one opened 6 days ago. `/code-review` was skipped for
+the default change, which changed one number.
+
 ## Summary Across Milestones
 
 | Milestone | Review findings | Fixed | Documented, not changed |
@@ -456,6 +512,7 @@ with no browser console errors.
 | M4 LLM | 9 | 9 | 0 |
 | M5 Deployment | 10 | 9 | 1 (Docker quoting; Docker later removed) |
 | M5 follow-up (setup script) | 29 confirmed by workflow + 9 from `/code-review` | 38 | 0 |
+| Fix: dev server reachability | 6 | 6 | 0 |
 | Follow-up: Claude Code provider | 26 confirmed by workflow + 9 from `/code-review` | 35 | 0 |
 | M6 Reader and model menu | 43 confirmed by workflow + 10 from `/code-review` | 53 | 0 |
 
@@ -463,34 +520,3 @@ Recurring pattern: the first implementation of each milestone passed its
 happy-path test. The review then found problems on unusual inputs (Unicode,
 ligatures, nulls), under concurrency (delete mid-download, stale responses),
 on failure paths (missing key, truncated output), and in deployment details.
-
-
-## Fix: "The Page Won't Open" (User Report)
-
-**Report:** after running the setup script, the user could not open the app.
-
-**Diagnosis:** nothing was listening on ports 8000 or 5173, so the servers were
-not running. Starting `make dev` showed two more problems in headless Chrome:
-
-- Vite bound only the IPv6 loopback `[::1]:5173` (its default `localhost` host on
-  macOS), while the backend bound only IPv4 `127.0.0.1:8000`. So
-  <http://127.0.0.1:5173> was refused, even though <http://localhost:5173> worked.
-- In development mode, <http://localhost:8000> returned a bare JSON 404, which
-  looks like a broken app.
-
-**Fix:** Vite now binds `127.0.0.1`, like the backend, and port 8000 shows a page
-that explains where the app is. INSTALL.md gained two troubleshooting rows.
-
-**`/code-review high` findings (6) and resolution:**
-
-| # | Finding | Action |
-|---|---------|--------|
-| 1 | **Regression from this fix:** with Vite on `127.0.0.1`, `strictPort` no longer notices another program on `[::1]:5173`, and browsers would open *that* program at `localhost:5173` | Fixed: a Vite plugin probes `[::1]:5173` and refuses to start if it is taken (tested with a dummy listener) |
-| 2 | The "not built yet, run make start" hint was wrong when `FRONTEND_DIST` points elsewhere | Fixed: the hint names the checked directory and `FRONTEND_DIST` |
-| 3 | A `dist` folder without `index.html` or `assets/` crashed startup or returned 500 | Fixed: requires both; otherwise the hint page shows (tested with 4 bad folders) |
-| 4 | INSTALL.md row blamed development mode for every "API server" page | Fixed: covers both cases |
-| 5 | "Keep the terminal open... `make dev`" confused readers using two terminals | Fixed wording |
-| 6 | Dev URL markup duplicated | Fixed: one constant |
-
-**Takeaway:** the first fix for a networking bug introduced a subtler
-networking bug, and the review caught it before commit.

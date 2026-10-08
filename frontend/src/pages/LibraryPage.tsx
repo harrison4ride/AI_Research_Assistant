@@ -30,7 +30,7 @@ export default function LibraryPage() {
   }, [filter])
 
   async function remove(paper: Paper) {
-    if (!window.confirm(`Remove “${paper.title}” from your library?`)) return
+    if (!window.confirm(`Remove “${paper.title}” from your library? The app also deletes its summaries, conversation, and stored PDF.`)) return
     try {
       await deletePaper(paper.id)
       deletedIds.current.add(paper.id)
@@ -73,8 +73,8 @@ export default function LibraryPage() {
             <p>No saved papers match “{filter.trim()}”.</p>
           ) : (
             <p>
-              Your library is empty. <a href="#/search">Search for papers</a> and save the ones you
-              want to read.
+              Your library is empty. <a href="#/search">Search for papers</a>, then save the ones you
+              want to keep.
             </p>
           )}
         </div>

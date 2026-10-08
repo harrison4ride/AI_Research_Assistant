@@ -66,6 +66,7 @@ export interface AppConfig {
   llm_hint: string | null // how to fix it when not ready
   llm_models: ModelOption[] // what the model menu offers
   llm_default_model: string
+  cached_paper_days: number // unsaved papers are deleted after this many days unopened
 }
 
 export interface OutlineSection {

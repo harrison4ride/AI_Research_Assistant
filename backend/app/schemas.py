@@ -109,6 +109,7 @@ class AppConfig(BaseModel):
     llm_hint: str | None  # how to fix it when not ready
     llm_models: list[ModelOption]  # what the reader's model menu offers
     llm_default_model: str  # id of the model used when none is chosen
+    cached_paper_days: int  # unsaved papers are deleted after this many days unopened
 
 
 class OutlineSummaryRequest(BaseModel):

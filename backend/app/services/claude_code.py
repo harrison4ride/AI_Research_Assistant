@@ -279,8 +279,8 @@ def _error_message(event: dict[str, Any], assistant_error: str | None) -> str:
     if assistant_error == "authentication_failed":
         return LOGIN_HINT
     if assistant_error == "rate_limit":
-        return (f"Claude Code usage limit reached ({detail or 'try again later'}). You can also set "
-                "`CLAUDE_CODE_MODEL` to another model in .env and restart the backend.")
+        return (f"Claude Code usage limit reached ({detail or 'try again later'}). If the limit "
+                "applies to one model only, another model in the reader's Model menu may still work.")
     return f"Claude Code reported an error: {detail or _as_str(event.get('subtype')) or 'unknown error'}"
 
 

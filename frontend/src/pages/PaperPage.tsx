@@ -104,7 +104,7 @@ export default function PaperPage({ id, onLibraryState }: Props) {
   }
 
   async function remove() {
-    if (!paper || !window.confirm(`Remove “${paper.title}” from your library?`)) return
+    if (!paper || !window.confirm(`Remove “${paper.title}” from your library? The app also deletes its summaries, conversation, and stored PDF.`)) return
     try {
       await deletePaper(paper.id)
       window.location.hash = '#/library'
@@ -230,9 +230,12 @@ export default function PaperPage({ id, onLibraryState }: Props) {
                   }
                 />
                 <p className="muted saved-on">
-                  {paper.in_library ? 'Saved' : 'Opened'}{' '}
+                  {paper.in_library ? 'Saved' : 'First opened'}{' '}
                   {new Date((paper.in_library && paper.saved_at) || paper.created_at).toLocaleString()}
-                  {!paper.in_library && ' · not in your library yet; save it to keep it (unsaved papers are cleaned up after a while unused)'}
+                  {!paper.in_library &&
+                    ` · not in your library yet; save it to keep it (unsaved papers are deleted after ${
+                      llm ? `${llm.cached_paper_days} day${llm.cached_paper_days === 1 ? '' : 's'}` : 'a while'
+                    } without being opened)`}
                 </p>
               </>
             ))}

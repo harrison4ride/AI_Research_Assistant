@@ -84,7 +84,8 @@ else:
     # the app is instead of answering "/" with a bare 404.
     DEV_UI = "<a href='http://localhost:5173'>http://localhost:5173</a>"  # port set in frontend/vite.config.ts
     if not settings.serve_frontend:
-        _hint = f"In development mode the app runs at {DEV_UI} (started by <code>make dev</code>)."
+        _hint = (f"In development mode the app runs at {DEV_UI} "
+                 "(started by <code>make dev</code> or <code>make frontend</code>).")
     else:
         _hint = (
             f"No frontend build was found in <code>{html.escape(str(dist))}</code>. "

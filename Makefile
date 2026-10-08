@@ -1,4 +1,4 @@
-# Common tasks. Requires uv (Python) and npm (Node.js); see INSTALL.md.
+# Common tasks. Requires uv (Python) and Node.js 22.13 or later with npm; see INSTALL.md.
 .PHONY: install check dev backend frontend build start
 
 install:            ## Check requirements, install all packages, create .env

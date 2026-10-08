@@ -70,7 +70,11 @@ function SummaryPanel({ paper, llm, model, onSummary }: Props) {
       ) : (
         !stream.error && (
           <p className="muted">
-            No summary yet. The assistant reads the paper itself, not just its title and abstract.
+            {paper.full_text_status === 'ok'
+              ? 'No summary yet. The assistant reads the text extracted from the PDF.'
+              : paper.full_text_status
+                ? 'No summary yet. The PDF text is not available, so the summary uses only the abstract.'
+                : 'No summary yet.'}
           </p>
         )
       )}

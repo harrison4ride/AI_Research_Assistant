@@ -179,9 +179,9 @@ export default function SearchPage() {
         </button>
       </form>
       <p className="hint muted">
-        OpenAlex covers all publishers (including arXiv) and is fast; the assistant can read the full
-        paper when it is open access, and you can attach a PDF otherwise. arXiv results always include
-        the PDF.
+        Click a title or Read to open the paper in the reader without saving it. OpenAlex covers most
+        publishers, including arXiv, and is fast. The assistant reads the full paper when it is open
+        access; otherwise you can attach a PDF. arXiv results always include the PDF.
       </p>
 
       {error && (
