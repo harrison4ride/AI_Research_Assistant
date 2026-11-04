@@ -1,6 +1,14 @@
 // A stand-in for the backend: tests register answers per method and path, and every
-// request the app makes is recorded. Nothing reaches a real server.
+// request the app makes is recorded. Nothing reaches a real server. A request that no
+// test registered gets a 501 and fails the test (setup.ts checks after each test).
 import { vi } from 'vitest'
+
+// The requests that mocks made in the current test could not answer.
+const unanswered: string[] = []
+
+export function takeUnansweredRequests(): string[] {
+  return unanswered.splice(0)
+}
 
 export interface Call {
   method: string
@@ -94,6 +102,7 @@ export function mockFetch() {
     const route = [...routes].reverse().find((r) => r.method === method && r.path === url.pathname)
     if (!route) {
       unhandled.push(`${method} ${url.pathname}${url.search}`)
+      unanswered.push(`${method} ${url.pathname}${url.search}`)
       return errorResponse(501, `No mock for ${method} ${url.pathname}`)
     }
     const { reply } = route

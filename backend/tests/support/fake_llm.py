@@ -38,8 +38,9 @@ class _Reply:
 class FakeLLM:
     """Stands in for the model.
 
-    Replaces llm.stream_reply (summaries, answers, section summaries) and
-    llm.extract_metadata (uploads), and records what the app sent. Unless a test
+    Replaces both providers behind llm.stream_reply (summaries, answers, section
+    summaries), so the app's own model validation and dispatch still run, and
+    llm.extract_metadata (uploads). Records what the app sent. Unless a test
     queues replies, every call answers "This is a fake answer.".
     """
 
@@ -54,17 +55,18 @@ class FakeLLM:
         """Queue an answer streamed as `chunks` (strings, or RESET)."""
         self._replies.append(_Reply(lambda call: list(chunks), model, stop_reason, None, before))
 
-    def reply_with(self, make_text: Callable[[LlmCall], str]) -> None:
+    def reply_with(self, make_text: Callable[[LlmCall], str],
+                   before: Callable[[LlmCall], None] | None = None) -> None:
         """Queue an answer computed from the call (e.g. from the prompt)."""
-        self._replies.append(_Reply(lambda call: [make_text(call)]))
+        self._replies.append(_Reply(lambda call: [make_text(call)], before=before))
 
     def fail(self, error: BaseException, *after: str) -> None:
         """Queue a failure, raised after streaming the `after` chunks."""
         self._replies.append(_Reply(lambda call: list(after), error=error))
 
-    async def stream_reply(self, context, messages, result, model=None):
-        chosen = llm.resolve_model(model)  # the same validation as the real call
-        call = LlmCall(context, [dict(m) for m in messages], chosen)
+    async def provider(self, context, messages, result, model):
+        """Replaces llm._stream_claude_code and llm._stream_api; `model` is already validated."""
+        call = LlmCall(context, [dict(m) for m in messages], model)
         self.calls.append(call)
         reply = self._replies.pop(0) if self._replies else _Reply(lambda call: ["This is a fake ", "answer."])
         if reply.before:

@@ -6,16 +6,25 @@ The app runs Claude Code as
 with the prompt as one JSON message on stdin, and checks the installation with
 `claude --version` and `claude auth status --json`.
 
+The reply never depends on the wording of the app's prompts. It recognizes only the
+data blocks and reply formats the app's parser relies on (<pages>, <headings>, a
+{"sections": ...} reply), and otherwise reports what it was given: the last line of
+the prompt, the paper's <title>, the last words of the paper's <text>, and how many
+earlier questions were quoted in <turn-...> tags. Like the real CLI, it reports the
+model it ran: claude-fake-<alias> for `--model <alias>`, claude-fake-1 without one.
+
 Behavior is set through environment variables, which the app passes on to the CLI:
-  FAKE_CLAUDE_MODE      ok (default) | error | rate_limit | auth_failed | refusal | max_tokens |
-                        empty | crash | hang | noise
-  FAKE_CLAUDE_REPLY     fixed answer text instead of the generated one
-  FAKE_CLAUDE_METADATA  reply to metadata-extraction prompts (default: prose without JSON,
-                        so the app keeps its PDF heuristics)
-  FAKE_CLAUDE_MODEL     model name to report (default claude-fake-1)
-  FAKE_CLAUDE_VERSION   output of --version (default "2.1.300 (Claude Code)")
-  FAKE_CLAUDE_AUTH      logged-in (default) | logged-out | fails | garbage
-  FAKE_CLAUDE_RECORD    file that gets one JSON line per invocation (argv, prompts, environment)
+  FAKE_CLAUDE_MODE         ok (default) | error | rate_limit | auth_failed | refusal | max_tokens |
+                           empty | crash | hang | noise
+  FAKE_CLAUDE_REPLY        fixed answer text instead of the generated one
+  FAKE_CLAUDE_METADATA     reply to metadata-extraction prompts (default: prose without JSON,
+                           so the app keeps its PDF heuristics)
+  FAKE_CLAUDE_MODEL        model name to report instead of the one derived from --model
+  FAKE_CLAUDE_CHUNK_DELAY  seconds between streamed pieces (default 0.002)
+  FAKE_CLAUDE_VERSION      output of --version (default "2.1.300 (Claude Code)")
+  FAKE_CLAUDE_AUTH         logged-in (default) | logged-out | fails | garbage
+  FAKE_CLAUDE_RECORD       file that gets one JSON line per invocation (argv, prompts,
+                           environment, process id)
 A prompt containing "[[fake:<mode>]]" uses that mode for one call; end-to-end tests use
 this, because their server's environment is fixed.
 
@@ -32,7 +41,7 @@ from pathlib import Path
 
 ENV_VARS = [
     "FAKE_CLAUDE_MODE", "FAKE_CLAUDE_REPLY", "FAKE_CLAUDE_METADATA", "FAKE_CLAUDE_MODEL",
-    "FAKE_CLAUDE_VERSION", "FAKE_CLAUDE_AUTH", "FAKE_CLAUDE_RECORD",
+    "FAKE_CLAUDE_CHUNK_DELAY", "FAKE_CLAUDE_VERSION", "FAKE_CLAUDE_AUTH", "FAKE_CLAUDE_RECORD",
 ]
 # Variables whose presence in the CLI's environment the tests check.
 WATCHED_ENV = [
@@ -59,7 +68,7 @@ def _record(entry: dict) -> None:
     path = os.environ.get("FAKE_CLAUDE_RECORD")
     if path:
         with open(path, "a", encoding="utf-8") as file:
-            file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            file.write(json.dumps({**entry, "pid": os.getpid()}, ensure_ascii=False) + "\n")
 
 
 def _emit(event: object) -> None:
@@ -78,34 +87,32 @@ def _tag(text: str, name: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _last_words(text: str, count: int = 6) -> str:
+    return " ".join(text.split()[-count:])
+
+
 def _reply(prompt: str, system: str) -> str:
     if os.environ.get("FAKE_CLAUDE_REPLY"):
         return os.environ["FAKE_CLAUDE_REPLY"]
-    if "<pages>" in prompt:  # metadata extraction from an uploaded PDF
+    if "<pages>" in prompt:  # metadata extraction: the first pages of an uploaded PDF
         return os.environ.get("FAKE_CLAUDE_METADATA", "Sorry, I could not read the metadata.")
-    title = _tag(system, "title") or "this paper"
-    basis = "the abstract only" if "Only the abstract is available" in system else "the full text"
     if block := re.search(r"<headings>\n(.*?)\n</headings>", prompt, re.DOTALL):  # section summaries
         headings = json.loads(block.group(1))
         return json.dumps({"summaries": [
             {"n": h["n"], "summary": f"Fake summary of the section {h['heading']}."} for h in headings
         ]})
-    if "Identify this paper's main sections" in prompt:
+    if '"sections"' in prompt:  # asked to name the sections itself, in this JSON form
         return json.dumps({"sections": [
             {"title": "Method", "summary": "Fake summary of the method."},
             {"title": "Results", "summary": "Fake summary of the results."},
         ]})
-    if "Summarize this paper" in prompt:
-        return (
-            f"**TL;DR**: Fake summary of “{title}”, written from {basis}.\n\n"
-            "**Problem**: Fake problem statement.\n\n"
-            "**Key results**: Fake results."
-        )
-    question = prompt.rsplit("The user's new question (answer this one):\n", 1)[-1].strip()
-    earlier = prompt.count('role="user"')
+    # A summary request or a question: report what arrived.
+    lines = prompt.strip().splitlines()
+    earlier = len(re.findall(r'<turn-[0-9a-f]+ role="user">', prompt))
     return (
-        f"Fake answer to “{question}” about “{title}”, from {basis}. "
-        f"Earlier questions in this conversation: {earlier}."
+        f"**Fake answer** to “{lines[-1] if lines else ''}” about “{_tag(system, 'title') or 'no title'}”. "
+        f"The paper text ends with “{_last_words(_tag(system, 'text') or '')}”. "
+        f"Earlier questions quoted: {earlier}."
     )
 
 
@@ -134,7 +141,8 @@ def _run(argv: list[str]) -> int:
     mode = os.environ.get("FAKE_CLAUDE_MODE", "ok")
     if trigger := re.search(r"\[\[fake:(\w+)\]\]", prompt):
         mode = trigger.group(1)
-    model = os.environ.get("FAKE_CLAUDE_MODEL", DEFAULT_MODEL)
+    requested = _option(argv, "--model")
+    model = os.environ.get("FAKE_CLAUDE_MODEL") or (f"claude-fake-{requested}" if requested else DEFAULT_MODEL)
 
     if mode == "crash":
         sys.stderr.write("fatal: simulated crash\n")
@@ -160,10 +168,11 @@ def _run(argv: list[str]) -> int:
         return 1
 
     text = "" if mode == "empty" else _reply(prompt, system)
+    delay = float(os.environ.get("FAKE_CLAUDE_CHUNK_DELAY", "0.002"))
     for chunk in _chunks(text):
         _emit({"type": "stream_event", "event": {
             "type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": chunk}}})
-        time.sleep(0.002)
+        time.sleep(delay)
     _emit({"type": "assistant", "message": {"model": model, "role": "assistant",
                                             "content": [{"type": "text", "text": text}]}})
     _emit({

@@ -116,18 +116,21 @@ describe('SummaryPanel', () => {
     expect(await screen.findByText('The response ended unexpectedly. Please try again.')).toBeInTheDocument()
   })
 
-  it('tells the user when a long paper was cut off', async () => {
+  it.each([
+    [true, true],
+    [false, false],
+  ])('tells the user when a long paper was cut off (cut off: %s)', async (truncated, noteShown) => {
     const { api, user } = setup()
     const stream = openStream()
     api.on('POST', '/api/papers/7/summary', stream.response)
 
     await user.click(screen.getByRole('button', { name: 'Generate summary' }))
-    stream.send({ type: 'meta', context: 'full_text', truncated: true })
+    stream.send({ type: 'meta', context: 'full_text', truncated })
+    stream.send({ type: 'text', text: 'The summary so far.' })
 
-    expect(
-      await screen.findByText('The paper is very long, so only its first part was sent to the model.'),
-    ).toBeInTheDocument()
-    stream.close()
+    expect(await screen.findByText('The summary so far.')).toBeInTheDocument() // the meta event was handled
+    const note = screen.queryByText('The paper is very long, so only its first part was sent to the model.')
+    expect(note !== null).toBe(noteShown)
   })
 
   it('discards text from a model that was replaced mid-answer', async () => {

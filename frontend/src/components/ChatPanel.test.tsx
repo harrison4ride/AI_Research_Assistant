@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { errorResponse, mockFetch, ndjson, openStream } from '../test/fetchMock'
@@ -59,7 +59,7 @@ describe('ChatPanel', () => {
     expect(await screen.findByText('opus · based on the abstract only')).toBeInTheDocument()
   })
 
-  it('asks a typed question with Enter and streams the answer', async () => {
+  it('asks a typed question with Enter and streams the answer as it arrives', async () => {
     const { api, user, textbox } = setup([], config(), 'sonnet')
     const stream = openStream()
     api.on('POST', '/api/papers/5/chat', stream.response)
@@ -71,13 +71,66 @@ describe('ChatPanel', () => {
     expect(screen.getByRole('button', { name: 'Answering…' })).toBeDisabled()
     expect(api.callsTo('POST', '/api/papers/5/chat')[0].body).toEqual({ question: 'What datasets are used?', model: 'sonnet' })
 
-    for (const event of answerEvents('What datasets are used?', 'WMT 2014 English-German.')) stream.send(event)
+    // README: "Answers stream in": the first words show while the answer is still running.
+    stream.send({ type: 'meta', context: 'full_text', truncated: false })
+    stream.send({ type: 'text', text: 'WMT 2014 ' })
+    await waitFor(() => expect(bubbles()).toEqual(['What datasets are used?', 'WMT 2014']))
+    expect(screen.getByRole('button', { name: 'Answering…' })).toBeDisabled()
+
+    stream.send({ type: 'text', text: 'English-German.' })
+    const [, , done] = answerEvents('What datasets are used?', 'WMT 2014 English-German.')
+    stream.send(done)
     stream.close()
 
     await waitFor(() =>
       expect(bubbles()).toEqual(['What datasets are used?', 'WMT 2014 English-German.claude-opus-5 via Claude Code']),
     )
     expect(screen.getByRole('button', { name: 'Ask' })).toBeDisabled() // the input is empty again
+  })
+
+  it('adds a new answer below the earlier conversation', async () => {
+    const { api, user, textbox } = setup(HISTORY)
+    api.on('POST', '/api/papers/5/chat', ndjson(answerEvents('And the datasets?', 'WMT 2014.')))
+    await waitFor(() => expect(bubbles()).toHaveLength(2))
+
+    await user.type(textbox, 'And the datasets?{Enter}')
+
+    await waitFor(() =>
+      expect(bubbles()).toEqual([
+        'What problem does this paper address?',
+        'It replaces recurrence with attention.claude-opus-5 via Claude Code',
+        'And the datasets?',
+        'WMT 2014.claude-opus-5 via Claude Code',
+      ]),
+    )
+  })
+
+  it('does not send a second question while an answer is running', async () => {
+    const { api, user, textbox } = setup(HISTORY)
+    const stream = openStream()
+    api.on('POST', '/api/papers/5/chat', stream.response)
+    await user.type(textbox, 'First question?{Enter}')
+    expect(await screen.findByRole('button', { name: 'Answering…' })).toBeDisabled()
+
+    await user.type(textbox, 'Second question?{Enter}')
+    await user.click(screen.getByRole('button', { name: 'What are the major limitations?' }))
+
+    expect(api.callsTo('POST', '/api/papers/5/chat')).toHaveLength(1)
+    expect(textbox).toHaveValue('Second question?') // kept for later
+    expect(screen.getByRole('button', { name: 'Clear conversation' })).toBeDisabled()
+  })
+
+  it('stops a running answer when the reader is closed', async () => {
+    const { api, user, textbox } = setup()
+    const stream = openStream()
+    api.on('POST', '/api/papers/5/chat', stream.response)
+    await user.type(textbox, 'Why?{Enter}')
+    await screen.findByRole('button', { name: 'Answering…' })
+
+    cleanup()
+
+    const signal = api.callsTo('POST', '/api/papers/5/chat')[0].init?.signal
+    expect(signal?.aborted).toBe(true)
   })
 
   it('keeps Shift+Enter for a new line', async () => {
@@ -151,6 +204,18 @@ describe('ChatPanel', () => {
     expect(screen.queryByRole('button', { name: 'Clear conversation' })).not.toBeInTheDocument()
   })
 
+  it('keeps the conversation when clearing fails', async () => {
+    const { api, user } = setup(HISTORY)
+    api.on('DELETE', '/api/papers/5/chat', errorResponse(500, 'Internal Server Error'))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    await user.click(await screen.findByRole('button', { name: 'Clear conversation' }))
+
+    expect(await screen.findByText('Internal Server Error')).toBeInTheDocument()
+    expect(bubbles()).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Clear conversation' })).toBeEnabled()
+  })
+
   it('keeps the conversation when clearing is cancelled', async () => {
     const { api, user } = setup(HISTORY)
     vi.spyOn(window, 'confirm').mockReturnValue(false)
@@ -171,7 +236,10 @@ describe('ChatPanel', () => {
   it('is disabled with an explanation when the LLM is unavailable', async () => {
     const { textbox } = setup([], config({ llm_ready: false, llm_hint: 'Claude Code (the `claude` command) was not found.' }))
 
-    expect(await screen.findByText('Summaries and Q&A are unavailable.')).toBeInTheDocument()
+    const notice = (await screen.findByText('Summaries and Q&A are unavailable.')).closest('p')!
+    // The backend's hint says how to fix it.
+    expect(notice).toHaveTextContent('Summaries and Q&A are unavailable. Claude Code (the claude command) was not found.')
+    expect(within(notice).getByText('claude').tagName).toBe('CODE')
     expect(textbox).toBeDisabled()
     expect(screen.getByRole('button', { name: 'What datasets are used?' })).toBeDisabled()
   })

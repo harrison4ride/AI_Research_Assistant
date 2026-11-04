@@ -83,14 +83,28 @@ describe('UploadBox', () => {
 
   it('uploads a PDF dropped onto it', async () => {
     const { api, onUploaded } = setup()
-    api.on('POST', '/api/papers/upload', jsonResponse(paper({ id: 4 }), 201))
-    const box = screen.getByRole('button', { name: 'Upload PDF' }).closest('.upload-box')!
+    const uploaded = paper({ id: 4, source: 'upload' })
+    api.on('POST', '/api/papers/upload', jsonResponse(uploaded, 201))
+    // Dropped on the button, the file reaches the drop zone around it ("or drop a paper here").
+    const target = screen.getByRole('button', { name: 'Upload PDF' })
 
-    fireEvent.dragOver(box)
-    expect(box).toHaveClass('dragging')
-    fireEvent.drop(box, { dataTransfer: { files: [pdfFile('dropped.pdf')] } })
+    fireEvent.dragOver(target)
+    fireEvent.drop(target, { dataTransfer: { files: [pdfFile('dropped.pdf')] } })
 
-    await waitFor(() => expect(onUploaded).toHaveBeenCalled())
-    expect(box).not.toHaveClass('dragging')
+    await waitFor(() => expect(onUploaded).toHaveBeenCalledWith(uploaded))
+    const form = api.callsTo('POST', '/api/papers/upload')[0].body as FormData
+    expect((form.get('file') as File).name).toBe('dropped.pdf')
+  })
+
+  it('refuses a dropped file that is not a PDF', async () => {
+    const { api, onUploaded } = setup()
+
+    fireEvent.drop(screen.getByRole('button', { name: 'Upload PDF' }), {
+      dataTransfer: { files: [new File(['hello'], 'notes.txt', { type: 'text/plain' })] },
+    })
+
+    expect(await screen.findByText('Please choose a PDF file.')).toBeInTheDocument()
+    expect(api.calls).toHaveLength(0)
+    expect(onUploaded).not.toHaveBeenCalled()
   })
 })

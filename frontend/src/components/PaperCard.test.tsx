@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { createEvent, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { searchResult } from '../test/fixtures'
@@ -33,13 +33,21 @@ describe('PaperCard', () => {
 
   it('toggles the full abstract', async () => {
     render(<PaperCard paper={searchResult()} />)
-    const abstract = screen.getByText(/The dominant sequence/)
-    expect(abstract).toHaveClass('clamped')
+    expect(screen.getByText(searchResult().abstract!)).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Show full abstract' }))
-    expect(abstract).not.toHaveClass('clamped')
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show full abstract' })).not.toBeInTheDocument()
+
     await userEvent.click(screen.getByRole('button', { name: 'Show less' }))
-    expect(abstract).toHaveClass('clamped')
+    expect(screen.getByRole('button', { name: 'Show full abstract' })).toBeInTheDocument()
+  })
+
+  it('shows the whole abstract without a toggle in the reader', () => {
+    render(<PaperCard paper={searchResult()} defaultExpanded />)
+
+    expect(screen.getByText(searchResult().abstract!)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Show/ })).not.toBeInTheDocument()
   })
 
   it('links the title to the paper page in a new tab by default', () => {
@@ -58,20 +66,23 @@ describe('PaperCard', () => {
     expect(title).not.toHaveAttribute('target')
   })
 
-  it('calls back instead of navigating when the title opens the reader', async () => {
+  it('calls back instead of navigating when the title opens the reader', () => {
     const onOpen = vi.fn()
     render(<PaperCard paper={searchResult()} onOpen={onOpen} />)
+    const title = screen.getByRole('link', { name: 'Attention Is All You Need' })
+    const click = createEvent.click(title)
 
-    await userEvent.click(screen.getByRole('link', { name: 'Attention Is All You Need' }))
+    fireEvent(title, click)
 
     expect(onOpen).toHaveBeenCalledOnce()
-    expect(window.location.hash).toBe('')
+    expect(click.defaultPrevented).toBe(true) // the browser does not follow the link
   })
 
-  it('prefers the open-access PDF link over the stored copy', () => {
-    const { rerender } = render(<PaperCard paper={searchResult()} localPdfHref="/api/papers/1/pdf" />)
+  it('links the PDF: the open-access copy of a search result, or the stored copy', () => {
+    const { rerender } = render(<PaperCard paper={searchResult()} />)
     expect(screen.getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', 'https://arxiv.org/pdf/1706.03762')
 
+    // (Which link wins when there are both: see LibraryPage.test.tsx.)
     rerender(<PaperCard paper={searchResult({ pdf_url: null })} localPdfHref="/api/papers/1/pdf" />)
     expect(screen.getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', '/api/papers/1/pdf')
   })

@@ -46,7 +46,7 @@ def test_openalex_search_returns_the_fields_the_ui_shows(client, upstream):
 def test_openalex_is_the_default_source_and_gets_the_query_and_paging(client, upstream):
     upstream.json(OPENALEX_WORKS, openalex_page([]))
 
-    client.get("/api/search", params={"q": "  graph neural networks  ", "page": 3, "per_page": 25})
+    response = client.get("/api/search", params={"q": "  graph neural networks  ", "page": 3, "per_page": 25})
 
     [request] = upstream.sent_to(OPENALEX_WORKS)
     params = request.url.params
@@ -54,6 +54,27 @@ def test_openalex_is_the_default_source_and_gets_the_query_and_paging(client, up
     assert (params["page"], params["per_page"]) == ("3", "25")
     assert "abstract_inverted_index" in params["select"].split(",")
     assert "mailto" not in params and "api_key" not in params
+    # The response names the page it holds, which "Load more" continues from.
+    body = response.json()
+    assert (body["query"], body["source"], body["page"], body["per_page"]) == ("graph neural networks", "openalex", 3, 25)
+
+
+@pytest.mark.parametrize("source", ["openalex", "arxiv"])
+def test_the_largest_valid_search_is_accepted(client, upstream, source):
+    upstream.json(OPENALEX_WORKS, openalex_page([]))
+    upstream.text(ARXIV_QUERY, arxiv_feed([]))
+    query = "transformer " * 25  # 300 characters, the search box's maxLength
+
+    response = client.get("/api/search", params={"q": query, "source": source, "page": 100, "per_page": 50})
+
+    assert response.status_code == 200
+    assert (response.json()["page"], response.json()["per_page"]) == (100, 50)
+    [request] = upstream.requests
+    params = request.url.params
+    if source == "openalex":
+        assert (params["page"], params["per_page"]) == ("100", "50")
+    else:
+        assert (params["start"], params["max_results"]) == ("4950", "50")
 
 
 def test_openalex_email_and_api_key_are_sent_when_configured(client, upstream, settings, monkeypatch):
@@ -222,13 +243,57 @@ def test_arxiv_rate_limit_pauses_further_calls(client, upstream):
     assert len(upstream.requests) == 1  # ...without calling arXiv again
 
 
-def test_arxiv_cooldown_defaults_to_a_minute(client, upstream):
-    upstream.get(ARXIV_QUERY, lambda r: httpx.Response(429))
+@pytest.mark.parametrize(("retry_after", "pause"), [
+    (None, 60),  # no header: a minute
+    ("30", 60),  # at least a minute
+    ("3600", 600),  # at most 10 minutes (README; INSTALL.md "up to 600 seconds")
+    ("Wed, 04 Nov 2026 20:00:00 GMT", 60),  # a date instead of seconds: a minute
+    ("soon", 60),
+])
+def test_arxiv_pause_lasts_one_to_ten_minutes_and_then_arxiv_is_asked_again(
+        client, upstream, clock, retry_after, pause):
+    headers = {"Retry-After": retry_after} if retry_after else {}
+    upstream.get(ARXIV_QUERY, lambda r: httpx.Response(429, headers=headers))
+
+    response = client.get("/api/search", params={"q": "first", "source": "arxiv"})
+
+    assert response.status_code == 429
+    assert f"paused for about {pause} s" in response.json()["detail"]
+    upstream.text(ARXIV_QUERY, arxiv_feed([arxiv_entry()]))
+    clock.advance(pause - 1)
+    assert client.get("/api/search", params={"q": "second", "source": "arxiv"}).status_code == 429
+    assert len(upstream.requests) == 1
+    clock.advance(1)
+    resumed = client.get("/api/search", params={"q": "third", "source": "arxiv"})
+    assert resumed.status_code == 200 and len(resumed.json()["results"]) == 1
+    assert len(upstream.requests) == 2
+
+
+def test_arxiv_calls_are_spaced_3_seconds_apart(client, upstream, clock):
+    # README: "The app keeps 3 seconds between its arXiv calls."
+    upstream.text(ARXIV_QUERY, arxiv_feed([]))
+
+    client.get("/api/search", params={"q": "first", "source": "arxiv"})
+    clock.advance(1.0)
+    client.get("/api/search", params={"q": "second", "source": "arxiv"})
+    clock.advance(5.0)
+    client.get("/api/search", params={"q": "third", "source": "arxiv"})
+
+    assert len(upstream.requests) == 3
+    # The second call waited the rest of the 3 s; the third, made later, did not wait.
+    assert clock.sleeps == [pytest.approx(2.0)]
+
+
+def test_arxiv_connection_error_is_reported_without_a_pause(client, upstream):
+    upstream.fail(ARXIV_QUERY, httpx.ConnectError, "[Errno 61] Connection refused")
 
     response = client.get("/api/search", params={"q": "x", "source": "arxiv"})
 
-    assert response.status_code == 429
-    assert "about 60 s" in response.json()["detail"]
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Could not reach arXiv. Check your connection and try again."
+    upstream.text(ARXIV_QUERY, arxiv_feed([]))
+    assert client.get("/api/search", params={"q": "y", "source": "arxiv"}).status_code == 200
+    assert len(upstream.requests) == 2
 
 
 def test_arxiv_timeout_also_starts_a_cooldown(client, upstream):
@@ -304,14 +369,46 @@ def test_cache_keeps_query_case_because_openalex_treats_AND_as_an_operator(clien
     assert [r.url.params["search"] for r in upstream.requests] == ["cats AND dogs", "cats and dogs"]
 
 
-def test_cache_separates_pages_and_sources(client, upstream):
+def test_cache_separates_pages_page_sizes_and_sources(client, upstream):
     upstream.json(OPENALEX_WORKS, openalex_page([]))
     upstream.text(ARXIV_QUERY, arxiv_feed([]))
 
-    for params in ({"q": "rag"}, {"q": "rag", "page": 2}, {"q": "rag", "source": "arxiv"}):
+    for params in ({"q": "rag"}, {"q": "rag", "page": 2}, {"q": "rag", "per_page": 25},
+                   {"q": "rag", "source": "arxiv"}):
         client.get("/api/search", params=params)
 
-    assert len(upstream.requests) == 3
+    assert len(upstream.requests) == 4
+
+
+def test_cached_results_expire_after_10_minutes(client, upstream, clock):
+    upstream.json(OPENALEX_WORKS, openalex_page([openalex_work()]))
+
+    client.get("/api/search", params={"q": "rag"})
+    clock.advance(599)
+    client.get("/api/search", params={"q": "rag"})
+    assert len(upstream.requests) == 1
+    clock.advance(2)
+    client.get("/api/search", params={"q": "rag"})
+
+    assert len(upstream.requests) == 2
+
+
+def test_the_cache_keeps_the_256_most_recently_used_searches(client, upstream):
+    upstream.json(OPENALEX_WORKS, openalex_page([]))
+    for n in range(256):
+        client.get("/api/search", params={"q": f"topic {n}"})
+    client.get("/api/search", params={"q": "topic 0"})  # used again: now the most recent
+
+    client.get("/api/search", params={"q": "topic 256"})  # one more than fits: "topic 1" goes
+
+    def sent_for(query: str) -> int:
+        return sum(r.url.params["search"] == query for r in upstream.requests)
+
+    client.get("/api/search", params={"q": "topic 0"})
+    client.get("/api/search", params={"q": "topic 2"})
+    assert (sent_for("topic 0"), sent_for("topic 2")) == (1, 1)  # still cached
+    client.get("/api/search", params={"q": "topic 1"})
+    assert sent_for("topic 1") == 2
 
 
 def test_failed_searches_are_not_cached(client, upstream):
@@ -337,7 +434,9 @@ def test_arxiv_query_builder():
 
 
 def test_openalex_abstract_is_rebuilt_from_the_inverted_index():
-    assert openalex.rebuild_abstract({"world": [1], "Hello": [0], "again": [3], "hello": [2]}) == (
-        "Hello world hello again")
+    # Real abstracts repeat words: every position of a word is used.
+    assert openalex.rebuild_abstract({"the": [0, 3], "cat": [1], "saw": [2], "dog": [4]}) == "the cat saw the dog"
+    assert openalex.rebuild_abstract({"dog.": [5], "the": [0, 3], "cat": [1], "saw": [2], "big": [4]}) == (
+        "the cat saw the big dog.")
     assert openalex.rebuild_abstract(None) is None
     assert openalex.rebuild_abstract({}) is None

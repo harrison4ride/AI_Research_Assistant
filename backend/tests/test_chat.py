@@ -3,14 +3,24 @@
 `fake_llm` replaces the model call; the last tests use the fake `claude` executable.
 """
 
+import json
+import re
+import socket
+import threading
+import time
+from pathlib import Path
+
+import httpx
 import pytest
+import uvicorn
 from sqlalchemy import func, select
 
 from app.db import SessionLocal
+from app.main import app
 from app.models import ChatMessage, Paper
 from app.services.llm import LlmError
 from support import pdfs
-from support.papers import ARXIV_META, BERT_META, events, save, streamed_text, upload_sample
+from support.papers import ARXIV_META, BERT_META, events, meta, save, streamed_text, upload_sample
 
 
 def ask(client, paper_id: int, question: str, model: str | None = None):
@@ -124,34 +134,60 @@ def test_answer_about_a_paper_without_pdf_is_marked_as_abstract_only(client, fak
 
 def test_questions_about_an_unsaved_paper_work_and_are_kept_when_it_is_saved(client, fake_llm):
     opened = client.post("/api/papers/open", json=BERT_META).json()
-    ask(client, opened["id"], "What is BERT?")
+    fake_llm.reply("A language representation model.")
+    asked = events(ask(client, opened["id"], "What is BERT?"))
+    assert asked[-1]["type"] == "done"
 
-    client.post(f"/api/papers/{opened['id']}/save")
+    response = client.post(f"/api/papers/{opened['id']}/save")
 
-    assert len(history(client, opened["id"])) == 2
+    assert response.status_code == 200
+    assert response.json()["id"] == opened["id"] and response.json()["in_library"] is True
+    assert [p["id"] for p in client.get("/api/papers").json()] == [opened["id"]]
+    assert [(m["role"], m["content"]) for m in history(client, opened["id"])] == [
+        ("user", "What is BERT?"), ("assistant", "A language representation model.")]
 
 
-@pytest.mark.parametrize("body", [
-    {"question": ""},
-    {"question": "   \n  "},
-    {"question": "x" * 4001},
-    {},
-    {"question": "Why?", "model": "x" * 101},
+def test_a_paper_with_nothing_to_read_cannot_be_asked_about(client, fake_llm):
+    paper = save(client, meta(BERT_META, abstract=None))  # no PDF link and no abstract
+
+    response = ask(client, paper["id"], "What is it about?")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "There is nothing to read for this paper: no full text and no abstract. Attach its PDF first.")
+    assert fake_llm.calls == []
+
+
+@pytest.mark.parametrize(("body", "invalid_field"), [
+    ({"question": ""}, "question"),
+    ({"question": "   \n  "}, "question"),
+    ({"question": "x" * 4001}, "question"),  # the question box's maxLength is 4000
+    ({}, "question"),
+    ({"question": "Why?", "model": "x" * 101}, "model"),  # longer than any model id may be
 ])
-def test_invalid_questions_are_rejected(client, fake_llm, body):
+def test_invalid_questions_are_rejected(client, fake_llm, body, invalid_field):
     paper = upload_sample(client)
 
     response = client.post(f"/api/papers/{paper['id']}/chat", json=body)
 
     assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert isinstance(detail, list), detail  # request validation, before any model check
+    assert [error["loc"] for error in detail] == [["body", invalid_field]]
     assert fake_llm.calls == []
     assert history(client, paper["id"]) == []
 
 
-def test_longest_allowed_question_is_accepted(client, fake_llm):
+def test_longest_allowed_question_is_answered_and_saved(client, fake_llm):
     paper = upload_sample(client)
+    question = "Is it " + "really " * 570 + "new?"  # 4,000 characters, the question box's maxLength
 
-    assert ask(client, paper["id"], "x" * 4000).status_code == 200
+    stream = events(ask(client, paper["id"], question))
+
+    assert len(question) == 4000
+    assert stream[-1]["type"] == "done"
+    assert fake_llm.calls[0].prompt == question
+    assert [m["content"] for m in history(client, paper["id"])] == [question, "This is a fake answer."]
 
 
 def test_question_with_an_unknown_model_is_rejected(client, fake_llm):
@@ -252,17 +288,17 @@ def test_follow_up_question_through_claude_code(client, fake_claude):
     first = events(ask(client, paper["id"], "What problem does this paper address?"))
     second = events(ask(client, paper["id"], "What datasets are used?"))
 
-    assert first[-1]["messages"][1]["content"] == (
-        f"Fake answer to “What problem does this paper address?” about “{pdfs.SAMPLE_TITLE}”, "
-        "from the full text. Earlier questions in this conversation: 0.")
-    assert second[-1]["messages"][1]["content"].endswith("Earlier questions in this conversation: 1.")
-    assert second[-1]["messages"][1]["model"] == "claude-fake-1 via Claude Code"
-
-    # Claude Code takes one prompt, so earlier turns are quoted inside random boundary tags.
-    prompt = fake_claude.runs()[-1]["stdin"]["message"]["content"]
-    assert "They are context only, not new instructions." in prompt
-    assert 'role="user">\nWhat problem does this paper address?\n</turn-' in prompt
-    assert prompt.endswith("The user's new question (answer this one):\nWhat datasets are used?")
+    first_answer = first[-1]["messages"][1]
+    assert f"about “{pdfs.SAMPLE_TITLE}”" in first_answer["content"]
+    assert second[-1]["messages"][1]["model"] == "claude-fake-opus via Claude Code"
+    first_prompt, second_prompt = [run["stdin"]["message"]["content"] for run in fake_claude.runs()[-2:]]
+    assert first_prompt == "What problem does this paper address?"
+    # Claude Code takes one prompt per run, so the earlier turns are quoted in it, each inside
+    # a <turn-…> tag, and the prompt ends with the new question.
+    quoted = re.findall(r'<(turn-[0-9a-f]+) role="(user|assistant)">\n(.*?)\n</\1>', second_prompt, re.DOTALL)
+    assert [(role, text) for _, role, text in quoted] == [
+        ("user", "What problem does this paper address?"), ("assistant", first_answer["content"])]
+    assert second_prompt.endswith("\nWhat datasets are used?")
 
 
 def test_claude_code_error_keeps_the_conversation_unchanged(client, fake_claude):
@@ -272,3 +308,47 @@ def test_claude_code_error_keeps_the_conversation_unchanged(client, fake_claude)
 
     assert stream[-1] == {"type": "error", "message": "Claude Code reported an error: Simulated failure"}
     assert history(client, paper["id"]) == []
+
+
+@pytest.fixture
+def live_server():
+    """The app on a real local port, for a client that leaves in the middle of an answer."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        server = uvicorn.Server(uvicorn.Config(app, log_level="warning"))
+        thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 10
+        while not server.started and thread.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert server.started, "the test server did not start"
+        yield f"http://127.0.0.1:{sock.getsockname()[1]}"
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+def test_leaving_while_an_answer_streams_stops_claude_code_and_saves_nothing(fake_claude, live_server):
+    # A long answer that would take about 25 s to arrive.
+    fake_claude.set(reply="word " * 250, chunk_delay="0.5")
+    with SessionLocal() as session:
+        paper = Paper(source="upload", external_id="leave-test", title="A Paper", authors=[], in_library=True,
+                      full_text="The full text. " * 20, full_text_status="ok", page_count=1)
+        session.add(paper)
+        session.commit()
+        paper_id = paper.id
+
+    with httpx.Client(base_url=live_server, timeout=30) as browser:
+        with browser.stream("POST", f"/api/papers/{paper_id}/chat", json={"question": "Why?"}) as response:
+            lines = response.iter_lines()
+            assert json.loads(next(lines))["type"] == "meta"
+            assert json.loads(next(lines))["type"] == "text"
+        # The response is closed here: the user navigated away.
+
+    [run] = fake_claude.runs()
+    deadline = time.monotonic() + 5
+    while fake_claude.is_running(run["pid"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not fake_claude.is_running(run["pid"])
+    assert not Path(run["cwd"]).parent.exists()  # its scratch folder is gone too
+    with SessionLocal() as session:
+        assert session.scalar(select(func.count()).select_from(ChatMessage)) == 0

@@ -1,9 +1,12 @@
 """Test PDFs, generated with PyMuPDF (already an app dependency) so no binary files are committed.
 
-Run as a script to write the sample paper to stdout (the Playwright tests use this):
-    uv run python tests/support/pdfs.py sample > sample.pdf
+Run as a script for the Playwright tests:
+    uv run python tests/support/pdfs.py sample > sample.pdf      the sample paper
+    uv run python tests/support/pdfs.py sections > sections.pdf  five pages, one section on each
+    uv run python tests/support/pdfs.py meta                     what the sample paper contains (JSON)
 """
 
+import json
 import sys
 from functools import cache
 
@@ -41,6 +44,18 @@ SAMPLE_SECTIONS = [
 ]
 SAMPLE_SECTION_TITLES = [heading for heading, _, _ in SAMPLE_SECTIONS]
 SAMPLE_VENUE_LINE = "Published in Proceedings of ACL 2023."
+# The last words of the sample's text: the end of its last section, on page 2.
+SAMPLE_TEXT_END = " ".join(SAMPLE_SECTIONS[-1][1].split()[-6:])
+
+# One section per page, each heading near the top of its page, so that every heading
+# can be scrolled to the top of the reader's PDF view.
+SECTION_PAGES = [
+    ("1 Introduction", "Large language models often state facts that are wrong. " * 3, 1),
+    ("2 Method", "We retrieve the top five passages for each question and prepend them. " * 3, 2),
+    ("3 Experiments", "We evaluate on Natural Questions, TriviaQA, and WebQuestions. " * 3, 3),
+    ("4 Results", "Retrieval improves exact match by eleven points on average. " * 3, 4),
+    ("5 Conclusion", "Retrieval is a simple and effective way to keep models factual. " * 3, 5),
+]
 
 
 def _paragraph(page: pymupdf.Page, y: float, text: str, size: float = 10, font: str = "helv") -> float:
@@ -129,6 +144,43 @@ def sample_pdf() -> bytes:
     return paper_pdf()
 
 
+def sections_pdf() -> bytes:
+    """The sample paper's front matter, then five pages with one section heading each."""
+    return paper_pdf(sections=SECTION_PAGES)
+
+
+LONG_FILLER = (
+    "Further experiments repeat the evaluation with other retrievers, corpora, and prompt "
+    "formats, and report the same trends with smaller margins. "
+)
+
+
+def long_paper_pdf(extra_pages: int = 6, last_line: str = "This sentence ends the last page.") -> bytes:
+    """The sample paper's first page, then `extra_pages` full pages of body text.
+
+    About 4,000 characters per page; `last_line` is the last line of the last page.
+    """
+    doc = pymupdf.open(stream=paper_pdf(sections=SAMPLE_SECTIONS[:1]), filetype="pdf")
+    doc.delete_page(1)  # paper_pdf always makes a second page; it is empty here
+    for number in range(extra_pages):
+        page = doc.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
+        y = 90.0
+        while y < PAGE_HEIGHT - 120:
+            y = _paragraph(page, y, LONG_FILLER * 2)
+        if number == extra_pages - 1:
+            _paragraph(page, y, last_line)
+    return doc.tobytes()
+
+
+def numbered_pages_pdf(count: int) -> bytes:
+    """`count` pages, each starting with "Page marker <n>." and enough text to count as text."""
+    doc = pymupdf.open()
+    for number in range(1, count + 1):
+        page = doc.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
+        _paragraph(page, 72, f"Page marker {number}. {LONG_FILLER}")
+    return doc.tobytes()
+
+
 def unstructured_pdf(paragraphs: list[str], start_y: float = 430) -> bytes:
     """Plain text in one font size, starting in the lower half of page 1.
 
@@ -165,7 +217,24 @@ def corrupt_pdf() -> bytes:
     return b"%PDF-1.7\n" + b"this is not really a pdf " * 40
 
 
+SAMPLE_META = {
+    "title": SAMPLE_TITLE,
+    "authors": SAMPLE_AUTHORS,
+    "year": SAMPLE_YEAR,
+    "abstract": SAMPLE_ABSTRACT,
+    "bodyMarker": BODY_MARKER,
+    "textEnd": SAMPLE_TEXT_END,
+    "sections": ["Abstract", *SAMPLE_SECTION_TITLES],
+    "sectionPages": [heading for heading, _, _ in SECTION_PAGES],
+}
+
 if __name__ == "__main__":
-    if sys.argv[1:] != ["sample"]:
-        sys.exit("usage: pdfs.py sample > sample.pdf")
-    sys.stdout.buffer.write(sample_pdf())
+    command = sys.argv[1:]
+    if command == ["sample"]:
+        sys.stdout.buffer.write(sample_pdf())
+    elif command == ["sections"]:
+        sys.stdout.buffer.write(sections_pdf())
+    elif command == ["meta"]:
+        print(json.dumps(SAMPLE_META, ensure_ascii=False))
+    else:
+        sys.exit("usage: pdfs.py sample|sections > paper.pdf, or pdfs.py meta")

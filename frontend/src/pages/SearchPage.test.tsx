@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { deferred, errorResponse, jsonResponse, mockFetch } from '../test/fetchMock'
@@ -38,7 +38,9 @@ describe('SearchPage', () => {
 
     await search(user, 'transformers')
 
-    expect(await screen.findByText('Showing 2 of 1,234 results for “transformers” from OpenAlex')).toBeInTheDocument()
+    // The total is formatted for the user's locale (1,234 in English, 1.234 in German).
+    const total = (1234).toLocaleString()
+    expect(await screen.findByText(`Showing 2 of ${total} results for “transformers” from OpenAlex`)).toBeInTheDocument()
     const [first] = screen.getAllByRole('article')
     const card = within(first)
     expect(card.getByRole('link', { name: 'Attention Is All You Need' })).toBeInTheDocument()
@@ -124,6 +126,44 @@ describe('SearchPage', () => {
     expect(await screen.findByText('Attention Is All You Need')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Search source' })).toHaveValue('openalex')
     expect(screen.queryByText(/arXiv is limiting requests/)).not.toBeInTheDocument()
+    // README: it "runs the same query on OpenAlex".
+    const [failed, retried] = api.callsTo('GET', '/api/search')
+    expect(Object.fromEntries(failed.query)).toEqual({ q: 'rag', source: 'arxiv', page: '1', per_page: '10' })
+    expect(Object.fromEntries(retried.query)).toEqual({ q: 'rag', source: 'openalex', page: '1', per_page: '10' })
+  })
+
+  // Suspected app bug: the button reads the search box when clicked, not the query that failed.
+  // README: "If an arXiv search fails, “Search OpenAlex instead” runs the same query on OpenAlex."
+  it.fails('runs the query that failed on OpenAlex even after the search box was edited', async () => {
+    const { api, user } = setup()
+    api.on('GET', '/api/search', (call) =>
+      call.query.get('source') === 'arxiv'
+        ? errorResponse(504, 'arXiv did not answer in time.')
+        : jsonResponse(searchResponse([searchResult()], { query: 'rag' })),
+    )
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Search source' }), 'arxiv')
+    await search(user, 'rag')
+    await screen.findByText('arXiv did not answer in time.')
+    await user.type(screen.getByRole('searchbox'), ' evaluation') // not searched yet
+
+    await user.click(screen.getByRole('button', { name: 'Search OpenAlex instead' }))
+
+    await waitFor(() => expect(api.callsTo('GET', '/api/search')).toHaveLength(2))
+    expect(api.callsTo('GET', '/api/search')[1].query.get('q')).toBe('rag')
+  })
+
+  // Suspected app bug: the button appears whenever an error is shown while arXiv is selected in
+  // the menu, so a failed OpenAlex search offers to "Search OpenAlex instead" once the menu is
+  // switched to arXiv. README offers it only after an arXiv search fails.
+  it.fails('offers OpenAlex only after an arXiv search failed', async () => {
+    const { api, user } = setup()
+    api.on('GET', '/api/search', errorResponse(504, 'OpenAlex timed out, please try again.'))
+    await search(user, 'rag') // on OpenAlex, the default
+    await screen.findByText('OpenAlex timed out, please try again.')
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Search source' }), 'arxiv')
+
+    expect(screen.queryByRole('button', { name: 'Search OpenAlex instead' })).not.toBeInTheDocument()
   })
 
   it('replaces the results with those of a new search', async () => {
@@ -166,6 +206,27 @@ describe('SearchPage', () => {
     expect(api.callsTo('GET', '/api/search')[1].query.get('page')).toBe('2')
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument()
   })
+
+  it('stops offering more after page 100, the last page the backend serves', async () => {
+    const { api, user } = setup()
+    api.on('GET', '/api/search', (call) => {
+      const page = Number(call.query.get('page'))
+      const result = searchResult({ external_id: `W${page}`, title: `Paper ${page}` })
+      return jsonResponse(searchResponse([result], { query: 'many', total: 100_000, page }))
+    })
+    await search(user, 'many')
+    await screen.findByText('Paper 1')
+
+    // (Text queries: role queries get slow on a list of 100 results.)
+    for (let page = 2; page <= 100; page++) {
+      fireEvent.click(await screen.findByText('Load more', { selector: 'button' }))
+      await screen.findByText(`Paper ${page}`)
+    }
+
+    expect(screen.queryByText('Load more')).not.toBeInTheDocument()
+    const pages = api.callsTo('GET', '/api/search').map((call) => Number(call.query.get('page')))
+    expect(pages).toEqual(Array.from({ length: 100 }, (_, i) => i + 1))
+  }, 20_000) // 99 clicks on a growing list
 
   it('stops offering more when a page adds nothing new', async () => {
     const { api, user } = setup()

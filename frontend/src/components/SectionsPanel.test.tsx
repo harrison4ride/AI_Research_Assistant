@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { deferred, errorResponse, jsonResponse, mockFetch } from '../test/fetchMock'
@@ -16,9 +16,23 @@ function setup(current: Outline = outline(), { position = 1, llm = config() }: {
   return { api, user, onJump }
 }
 
-function sectionItem(title: string): HTMLElement {
-  return screen.getByText(title).closest('li')!
+// The panel marks the section being read only visually (class "active", styled in index.css);
+// there is no accessible marker such as aria-current to read instead.
+function sectionsBeingRead(): string[] {
+  return screen
+    .getAllByRole('listitem')
+    .filter((item) => item.classList.contains('active'))
+    .map((item) => within(item).getByRole('button').firstChild?.textContent ?? '')
 }
+
+const TWO_COLUMNS = outline({
+  sections: [
+    // A two-column paper lists the right column's heading after the left one's, though it starts higher.
+    { level: 1, title: '3 Results', page: 4, top: 0.6, summary: null },
+    { level: 1, title: '4 Discussion', page: 4, top: 0.2, summary: null },
+    { level: 1, title: 'Appendix', page: null, top: null, summary: null },
+  ],
+})
 
 describe('SectionsPanel', () => {
   it('lists the sections with their pages', async () => {
@@ -31,7 +45,7 @@ describe('SectionsPanel', () => {
       '2 Methodp. 2',
       '2.1 Retrieverp. 2',
     ])
-    expect(sectionItem('2.1 Retriever')).toHaveClass('level-2')
+    expect(screen.getByRole('button', { name: /2 Method/ })).toHaveAttribute('title', 'Go to page 2')
   })
 
   it('jumps to a section in the PDF', async () => {
@@ -52,14 +66,39 @@ describe('SectionsPanel', () => {
     expect(onJump).not.toHaveBeenCalled()
   })
 
-  it('highlights the section being read', async () => {
-    setup(outline(), { position: 2.3 })
+  // The section being read starts furthest down, but at or above the reading position
+  // (page + fraction of the page); at the end of the document it is the last section.
+  it.each([
+    [outline(), 1.1, []], // above the first heading
+    [outline(), 1.3, ['1 Introduction']], // exactly where it starts
+    [outline(), 2.05, ['1 Introduction']], // page 2, above its first heading
+    [outline(), 2.3, ['2 Method']],
+    [outline(), 2.75, ['2.1 Retriever']],
+    [outline(), Number.POSITIVE_INFINITY, ['2.1 Retriever']], // scrolled to the end
+    [TWO_COLUMNS, 4.3, ['4 Discussion']], // listed later, but the only one started
+    [TWO_COLUMNS, 4.7, ['3 Results']], // both started: the one starting further down
+    [TWO_COLUMNS, Number.POSITIVE_INFINITY, ['3 Results']], // a section without a page never counts
+  ])('highlights the section being read (outline %#, position %f)', async (sections, position, expected) => {
+    setup(sections, { position })
 
-    await screen.findByText('2 Method')
+    await screen.findAllByRole('listitem')
 
-    expect(sectionItem('2 Method')).toHaveClass('active')
-    expect(sectionItem('1 Introduction')).not.toHaveClass('active')
-    expect(sectionItem('2.1 Retriever')).not.toHaveClass('active')
+    expect(sectionsBeingRead()).toEqual(expected)
+  })
+
+  it('reads the outline again when the paper gains a PDF', async () => {
+    const api = mockFetch().on('GET', '/api/papers/3/outline', outline({ available: false, reason: "The outline needs the paper's PDF.", sections: [] }))
+    const withoutPdf = paper({ id: 3, has_pdf: false, full_text_status: 'unavailable' })
+    const props = { llm: config(), model: 'opus', position: 1, onJump: vi.fn() }
+    const { rerender } = render(<SectionsPanel paper={withoutPdf} {...props} />)
+    expect(await screen.findByText("The outline needs the paper's PDF.")).toBeInTheDocument()
+    api.on('GET', '/api/papers/3/outline', outline())
+
+    // E.g. the user attached the PDF.
+    rerender(<SectionsPanel paper={{ ...withoutPdf, has_pdf: true, full_text_status: 'ok' }} {...props} />)
+
+    expect(await screen.findByRole('button', { name: /2 Method/ })).toBeInTheDocument()
+    expect(api.callsTo('GET', '/api/papers/3/outline')).toHaveLength(2)
   })
 
   it('writes one-sentence summaries on request', async () => {

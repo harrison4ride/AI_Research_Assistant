@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from app.services import claude_code, llm
+from support.clock import FakeClock
 
 
 async def run(prompt="What is new?", *, system="SYSTEM PROMPT", model="sonnet", effort="low", timeout=600.0):
@@ -37,21 +38,42 @@ async def test_answer_is_streamed_and_the_outcome_filled(fake_claude):
 
     assert len(chunks) > 1
     assert "".join(chunks) == outcome.text == "A streamed answer that is long enough to arrive in several pieces."
-    assert outcome.model == "claude-fake-1"
+    assert outcome.model == "claude-fake-sonnet"  # what the CLI reported for --model sonnet
     assert outcome.stop_reason == "end_turn"
     assert outcome.usage["output_tokens"] == 80
     assert outcome.cost_usd == 0.0
 
 
+def option(argv: list[str], flag: str) -> str:
+    assert argv.count(flag) == 1, f"{flag} is not given once in {argv}"
+    return argv[argv.index(flag) + 1]
+
+
 async def test_cli_is_locked_down_and_gets_the_prompts(fake_claude):
-    await run("What datasets are used? See @/etc/hosts", system="You are a research assistant.")
+    system = "You are a research assistant. The paper follows."
+    await run("What datasets are used? See @/etc/hosts", system=system)
 
     [call] = fake_claude.runs()
     argv = call["argv"]
-    assert argv[:len(claude_code.LOCKDOWN_ARGS)] == claude_code.LOCKDOWN_ARGS
-    assert argv[argv.index("--model") + 1] == "sonnet"
-    assert argv[argv.index("--effort") + 1] == "low"
-    assert call["system_prompt"] == "You are a research assistant."
+    # README/INSTALL.md: no tools, no MCP servers, no CLAUDE.md or settings, no saved sessions,
+    # and a single model turn.
+    assert option(argv, "--tools") == ""
+    assert option(argv, "--disallowedTools") == "mcp__*"
+    assert "--strict-mcp-config" in argv
+    assert option(argv, "--setting-sources") == ""
+    assert "--no-session-persistence" in argv
+    assert "--disable-slash-commands" in argv
+    assert "--safe-mode" in argv
+    assert option(argv, "--max-turns") == "1"
+    # Non-interactive, speaking stream-json both ways.
+    assert "--print" in argv
+    assert (option(argv, "--output-format"), option(argv, "--input-format")) == ("stream-json", "stream-json")
+    assert option(argv, "--model") == "sonnet"
+    assert option(argv, "--effort") == "low"
+    # The system prompt (it holds the whole paper) goes in a file, never on the command line.
+    assert call["system_prompt"] == system
+    assert "--system-prompt" not in argv and Path(option(argv, "--system-prompt-file")).name == "system-prompt.md"
+    assert not any("research assistant" in arg for arg in argv)
     # The prompt goes over stdin, verbatim (client_composed: no @file expansion).
     assert call["stdin"]["message"] == {"role": "user", "content": "What datasets are used? See @/etc/hosts"}
     assert call["stdin"]["client_composed"] is True
@@ -93,7 +115,7 @@ async def test_lines_that_are_not_events_are_skipped(fake_claude):
 
     chunks, outcome = await run()
 
-    assert outcome.text == "Still answered."
+    assert "".join(chunks) == outcome.text == "Still answered."
 
 
 @pytest.mark.parametrize(("mode", "message"), [
@@ -123,13 +145,28 @@ async def test_a_login_failure_forgets_the_cached_ready_status(fake_claude):
 
 
 async def test_a_hanging_cli_is_stopped_at_the_timeout(fake_claude):
-    fake_claude.set(mode="hang")
+    fake_claude.set(mode="hang")  # it would sleep for a minute
     started = time.monotonic()
 
     with pytest.raises(claude_code.ClaudeCodeError, match="Claude Code did not finish in time. Try again."):
         await run(timeout=1.0)
 
-    assert time.monotonic() - started < 10  # the process group was killed, not waited for
+    assert time.monotonic() - started < 10
+    [call] = fake_claude.runs()
+    assert not fake_claude.is_running(call["pid"])  # stopped, not left running
+    assert not Path(call["cwd"]).parent.exists()
+
+
+async def test_a_cli_that_cannot_be_started_is_reported(settings, monkeypatch, tmp_path):
+    not_a_program = tmp_path / "claude"
+    not_a_program.write_bytes(b"\x00\x01 not an executable format")
+    not_a_program.chmod(0o755)
+    monkeypatch.setattr(settings, "claude_code_path", str(not_a_program))
+
+    with pytest.raises(claude_code.ClaudeCodeError) as raised:
+        await run()
+
+    assert str(raised.value).startswith("Could not start Claude Code: ")
 
 
 async def test_missing_cli(settings, monkeypatch, tmp_path):
@@ -169,10 +206,6 @@ def test_configured_cli_that_is_not_executable(settings, monkeypatch, tmp_path):
 # --- Installation / login status ---------------------------------------------------------------
 
 
-async def test_status_ready(fake_claude):
-    assert await claude_code.status() == (True, None)
-
-
 @pytest.mark.parametrize(("options", "expected"), [
     ({"auth": "logged-out"}, (False, claude_code.LOGIN_HINT)),
     ({"auth": "fails"}, (False, claude_code.LOGIN_HINT)),
@@ -201,20 +234,39 @@ async def test_concurrent_status_checks_share_one_check(fake_claude):
     assert len(fake_claude.invocations()) == 2
 
 
+async def test_not_ready_is_rechecked_after_3_seconds_and_ready_after_30(fake_claude, monkeypatch):
+    # Short for "not ready", so a fresh `claude auth login` shows up quickly.
+    clock = FakeClock()
+    monkeypatch.setattr(claude_code, "time", clock.as_time_module())
+    fake_claude.set(auth="logged-out")
+
+    assert (await claude_code.status())[0] is False
+    fake_claude.set(auth="logged-in")  # the user logs in
+    clock.advance(2.9)
+    assert (await claude_code.status())[0] is False  # still the cached answer
+    clock.advance(0.2)
+    assert await claude_code.status() == (True, None)
+    checks = len(fake_claude.invocations())
+    clock.advance(29.9)
+    assert await claude_code.status() == (True, None)
+    assert len(fake_claude.invocations()) == checks
+    clock.advance(0.2)
+    await claude_code.status()
+    assert len(fake_claude.invocations()) == checks + 2  # --version and auth status again
+
+
+@pytest.mark.parametrize("failure", [asyncio.TimeoutError(), PermissionError(13, "Permission denied")])
+async def test_an_inconclusive_status_check_counts_as_ready(fake_claude, monkeypatch, failure):
+    # The real request then reports its own, more specific error.
+    async def capture(*args, timeout):
+        raise failure
+
+    monkeypatch.setattr(claude_code, "_capture", capture)
+
+    assert await claude_code.status() == (True, None)
+
+
 # --- Through the provider ----------------------------------------------------------------------
-
-
-async def test_summary_request_through_the_provider(fake_claude):
-    ctx = llm.build_context(title="A Paper About Retrieval", authors=["Ann"], year=2024, abstract="Abs.",
-                            full_text="The full text.", page_count=3)
-    result: list[llm.StreamResult] = []
-
-    events = [e async for e in llm.stream_reply(ctx, [{"role": "user", "content": llm.SUMMARY_REQUEST}], result)]
-
-    assert "".join(e.text for e in events) == result[0].text
-    assert result[0].text.startswith("**TL;DR**: Fake summary of “A Paper About Retrieval”, written from the full text.")
-    assert result[0].model == "claude-fake-1 via Claude Code"
-    assert fake_claude.runs()[0]["system_prompt"] == ctx.system_text
 
 
 async def test_metadata_extraction_through_claude_code(fake_claude):

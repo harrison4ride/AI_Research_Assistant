@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
-import { DPR, RAG, emptyLibrary, search } from './support/app'
+import { DPR, RAG, expectTabMarked, resetApp, search } from './support/app'
 
 test.beforeEach(async ({ request }) => {
-  await emptyLibrary(request)
+  await resetApp(request)
 })
 
 test('search for papers, save one, and find it in the library after a reload', async ({ page }) => {
@@ -31,7 +31,7 @@ test('search for papers, save one, and find it in the library after a reload', a
   await expect(page.getByRole('article').filter({ hasText: DPR }).getByRole('button', { name: 'Save to library' })).toBeVisible()
 })
 
-test('filter the library and remove a paper', async ({ page }) => {
+test('filter the library and remove a paper', async ({ page, request }) => {
   await page.goto('/')
   await search(page, 'dense retrieval')
   for (const title of [RAG, DPR]) {
@@ -42,7 +42,8 @@ test('filter the library and remove a paper', async ({ page }) => {
 
   await page.getByRole('link', { name: 'Library', exact: true }).click()
   await expect(page.getByText('2 papers')).toBeVisible()
-  await page.getByPlaceholder('Filter by title, author, or abstract').fill('oğuz')
+  await expectTabMarked(page, 'Library')
+  await page.getByPlaceholder('Filter by title, author, or abstract').fill('oğuz') // an author, not ASCII
   await expect(page.getByText('1 paper matching')).toBeVisible()
   await expect(page.getByRole('article')).toContainText(DPR)
 
@@ -50,12 +51,16 @@ test('filter the library and remove a paper', async ({ page }) => {
   await page.getByRole('article').getByRole('button', { name: 'Remove' }).click()
   await expect(page.getByText('No saved papers match “oğuz”.')).toBeVisible()
 
-  await page.getByPlaceholder('Filter by title, author, or abstract').fill('')
+  // Removed on the server, not only on the page: a reload and the API agree.
+  await page.reload()
   await expect(page.getByText('1 paper', { exact: true })).toBeVisible()
+  await expect(page.getByRole('article')).toHaveCount(1)
   await expect(page.getByRole('article')).toContainText(RAG)
+  const library: { title: string }[] = await (await request.get('/api/papers')).json()
+  expect(library.map((paper) => paper.title)).toEqual([RAG])
 })
 
-test('search arXiv', async ({ page }) => {
+test('search arXiv and open a result whose PDF link is not public', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('combobox', { name: 'Search source' }).selectOption('arxiv')
   await search(page, 'attention is all you need')
@@ -63,8 +68,19 @@ test('search arXiv', async ({ page }) => {
   await expect(page.getByText(/Showing 1 of 1 results for “attention is all you need” from arXiv/)).toBeVisible()
   const card = page.getByRole('article')
   await expect(card.getByRole('link', { name: 'Attention Is All You Need' })).toBeVisible()
+  await expect(card.getByText('Ashish Vaswani, Noam Shazeer, Niki Parmar')).toBeVisible()
   await expect(card.getByText('NeurIPS 2017')).toBeVisible()
-  await expect(card.getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', 'http://arxiv.org/pdf/1706.03762v7')
+  // The fake arXiv entry links its PDF on a documentation-only address (see e2e_server.py).
+  await expect(card.getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', 'http://192.0.2.10/pdf/1706.03762v7')
+
+  await card.getByRole('button', { name: 'Read' }).click()
+
+  // README: PDFs are downloaded "only from public http(s) addresses"; the reader says why
+  // it falls back to the abstract and offers to attach the PDF.
+  await expect(page.getByText('Only the abstract is available.')).toBeVisible()
+  await expect(page.getByText(/The PDF link points to a local or private address, so it was not downloaded\./)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Attach PDF' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Abstract' })).toBeVisible()
 })
 
 test('failed and empty searches are explained', async ({ page }) => {

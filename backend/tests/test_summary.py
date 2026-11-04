@@ -4,19 +4,29 @@
 the default Claude Code provider end to end against the fake `claude` executable.
 """
 
+import re
+from types import SimpleNamespace
+
 import httpx
+import pytest
 
 from app.db import SessionLocal
 from app.models import Paper
+from app.services import llm, pdf
 from app.services.llm import SUMMARY_REQUEST, LlmError
 from support import pdfs
+from support.fake_anthropic import FakeAnthropic, answer
 from support.fake_llm import RESET
-from support.papers import ARXIV_META, BERT_META, events, meta, save, streamed_text, upload_sample
+from support.papers import ARXIV_META, BERT_META, events, meta, save, streamed_text, upload, upload_sample
 from support.upstream import PUBLIC_IP
 
 
 def summarize(client, paper_id: int, model: str | None = None):
     return client.post(f"/api/papers/{paper_id}/summary", params={"model": model} if model else None)
+
+
+def source_note(paper_block: str) -> str:
+    return re.search(r"<source_note>(.*?)</source_note>", paper_block, re.DOTALL).group(1)
 
 
 def test_summary_is_streamed_and_saved(client, fake_llm):
@@ -51,7 +61,7 @@ def test_summary_is_based_on_the_full_text_of_the_paper(client, fake_llm):
     assert f"<title>{pdfs.SAMPLE_TITLE}</title>" in call.paper
     assert "<authors>Alice Smith, Bob Jones, Carol White</authors>" in call.paper
     assert pdfs.BODY_MARKER in call.paper  # text from page 2, not just the metadata
-    assert "Full text extracted from the PDF (2 pages)." in call.paper
+    assert re.search(r"\b2 pages\b", source_note(call.paper))  # the model knows how long the paper is
     assert call.model == "opus"  # the configured default
 
 
@@ -181,6 +191,61 @@ def test_very_long_paper_is_cut_off_and_the_client_is_told(client, fake_llm, set
     assert pdfs.BODY_MARKER not in paper_block
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "Suspected app bug: pdf.extract reads only the first MAX_PDF_PAGES_FOR_TEXT pages, but "
+    "build_context is given page_count of the whole PDF and truncated=False, so neither the model "
+    "nor the UI is told that the text was cut off (README: the prompt tells the model when a long "
+    "paper is cut off, and the Summary tab shows a note)."))
+def test_a_pdf_longer_than_the_page_limit_is_reported_as_cut_off(client, fake_llm):
+    paper = upload(client, pdfs.numbered_pages_pdf(pdf.MAX_PDF_PAGES_FOR_TEXT + 2)).json()
+
+    stream = events(summarize(client, paper["id"]))
+
+    note = source_note(fake_llm.calls[0].paper)
+    assert stream[0] == {"type": "meta", "context": "full_text", "truncated": True}  # the UI is told
+    assert "cut off" in note  # and so is the model
+
+
+@pytest.mark.parametrize(("pdf_url", "downloads"), [
+    ("https://papers.example.org/missing.pdf", 1),  # the link answers 404
+    ("http://10.0.0.7/bert.pdf", 0),  # a private address: refused without a request
+])
+def test_after_a_failed_download_the_abstract_is_used_and_labelled(client, fake_llm, upstream, dns, pdf_url, downloads):
+    dns["papers.example.org"] = PUBLIC_IP
+    upstream.get("https://papers.example.org/missing.pdf", lambda request: httpx.Response(404))
+    paper = save(client, meta(BERT_META, pdf_url=pdf_url))
+
+    summary = events(summarize(client, paper["id"]))
+    answer_ = events(client.post(f"/api/papers/{paper['id']}/chat", json={"question": "What is new?"}))
+    again = events(summarize(client, paper["id"]))
+
+    assert [stream[0]["context"] for stream in (summary, answer_, again)] == ["abstract"] * 3
+    assert summary[-1]["paper"]["summary_context"] == "abstract"
+    assert answer_[-1]["messages"][1]["context"] == "abstract"
+    assert all(BERT_META["abstract"] in call.paper for call in fake_llm.calls)
+    assert len(upstream.requests) == downloads  # tried once, not again for every request
+
+
+@pytest.mark.parametrize("endpoint", ["summary", "chat"])
+def test_a_paper_deleted_while_its_pdf_downloads_is_404(client, fake_llm, upstream, dns, endpoint):
+    dns["papers.example.org"] = PUBLIC_IP
+    paper = save(client, meta(BERT_META, pdf_url="https://papers.example.org/bert.pdf"))
+
+    def delete_then_answer(request):
+        with SessionLocal() as session:
+            session.delete(session.get(Paper, paper["id"]))
+            session.commit()
+        return httpx.Response(200, content=pdfs.sample_pdf())
+
+    upstream.get("https://papers.example.org/bert.pdf", delete_then_answer)
+
+    response = client.post(f"/api/papers/{paper['id']}/{endpoint}",
+                           json={"question": "Why?"} if endpoint == "chat" else None)
+
+    assert (response.status_code, response.json()["detail"]) == (404, "Paper not found.")
+    assert fake_llm.calls == []
+
+
 def test_paper_deleted_while_the_summary_was_written(client, fake_llm):
     paper = upload_sample(client)
 
@@ -207,9 +272,11 @@ def test_summary_through_claude_code(client, fake_claude):
     assert stream[0]["context"] == "full_text"
     assert len([e for e in stream if e["type"] == "text"]) > 1  # streamed in pieces
     summary = stream[-1]["paper"]["summary"]
-    assert summary.startswith(f"**TL;DR**: Fake summary of “{pdfs.SAMPLE_TITLE}”, written from the full text.")
+    # The fake CLI reports what it was given: the paper's title and its text up to page 2's last words.
+    assert f"about “{pdfs.SAMPLE_TITLE}”" in summary
+    assert f"The paper text ends with “{pdfs.SAMPLE_TEXT_END}”" in summary
     assert streamed_text(stream) == summary
-    assert stream[-1]["paper"]["summary_model"] == "claude-fake-1 via Claude Code"
+    assert stream[-1]["paper"]["summary_model"] == "claude-fake-haiku via Claude Code"
 
     # The upload asked Claude Code for the metadata (quickly, at low effort), then the summary ran.
     metadata_run, summary_run = fake_claude.runs()
@@ -232,6 +299,35 @@ def test_claude_code_failure_is_shown_to_the_user(client, fake_claude):
     assert client.get(f"/api/papers/{paper['id']}").json()["summary"] is None
 
 
+@pytest.mark.parametrize(("mode", "message"), [
+    ("refusal", "The model declined to answer this request."),
+    ("empty", "The model returned an empty answer. Try again."),
+])
+def test_a_refused_or_empty_summary_from_claude_code_keeps_the_previous_one(client, fake_claude, mode, message):
+    paper = upload_sample(client)
+    previous = events(summarize(client, paper["id"]))[-1]["paper"]
+    fake_claude.set(mode=mode)
+
+    stream = events(summarize(client, paper["id"]))
+
+    assert stream[-1] == {"type": "error", "message": message}
+    saved = client.get(f"/api/papers/{paper['id']}").json()
+    assert (saved["summary"], saved["summary_created_at"]) == (previous["summary"], previous["summary_created_at"])
+
+
+def test_a_summary_cut_off_by_claude_code_is_kept_with_a_note(client, fake_claude):
+    paper = upload_sample(client)
+    fake_claude.set(mode="max_tokens")
+
+    stream = events(summarize(client, paper["id"]))
+
+    summary = stream[-1]["paper"]["summary"]
+    answer_text = streamed_text(stream)
+    assert answer_text and summary.startswith(answer_text)
+    assert "cut off" in summary[len(answer_text):]
+    assert client.get(f"/api/papers/{paper['id']}").json()["summary"] == summary
+
+
 def test_summary_when_claude_code_is_not_installed(client):
     # CLAUDE_CODE_PATH points at a missing file (conftest.py): the user gets the fix.
     paper = upload_sample(client)
@@ -240,3 +336,36 @@ def test_summary_when_claude_code_is_not_installed(client):
 
     assert stream[-1]["type"] == "error"
     assert "CLAUDE_CODE_PATH" in stream[-1]["message"]
+
+
+# --- Through the Anthropic API provider (LLM_PROVIDER=api, fake client) -------------------------
+
+
+def test_summary_and_answers_through_the_anthropic_api(client, settings, monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "api")
+    api = FakeAnthropic()
+    api.parse_result = SimpleNamespace(stop_reason="max_tokens", parsed_output=None)  # upload: heuristics
+    api.streams = [answer("**TL;DR**: A summary from the API."),
+                   answer("An answer from Sonnet.", model="claude-sonnet-5-20261001")]
+    monkeypatch.setattr(llm, "get_client", lambda: api)
+    paper = upload_sample(client)
+
+    summary = events(summarize(client, paper["id"]))
+    reply = events(client.post(f"/api/papers/{paper['id']}/chat",
+                               json={"question": "What datasets are used?", "model": "claude-sonnet-5"}))
+    alias = client.post(f"/api/papers/{paper['id']}/chat", json={"question": "Why?", "model": "haiku"})
+
+    assert streamed_text(summary) == summary[-1]["paper"]["summary"] == "**TL;DR**: A summary from the API."
+    assert summary[-1]["paper"]["summary_model"] == "claude-opus-5"
+    assert reply[-1]["messages"][1]["content"] == "An answer from Sonnet."
+    assert reply[-1]["messages"][1]["model"] == "claude-sonnet-5-20261001"
+    # A Claude Code alias is not an API model.
+    assert (alias.status_code, alias.json()["detail"]) == (422, "Unknown model “haiku”.")
+    summary_request, question_request = api.stream_params
+    assert summary_request["model"] == "claude-opus-5"
+    assert summary_request["messages"] == [{"role": "user", "content": SUMMARY_REQUEST}]
+    instructions, paper_block = summary_request["system"]
+    assert pdfs.BODY_MARKER in paper_block["text"] and paper_block["cache_control"] == {"type": "ephemeral"}
+    assert question_request["model"] == "claude-sonnet-5"
+    assert question_request["system"] == summary_request["system"]  # the same cached paper prefix
+    assert question_request["messages"] == [{"role": "user", "content": "What datasets are used?"}]

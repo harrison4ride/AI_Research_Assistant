@@ -1,17 +1,19 @@
 """Fake external HTTP services (OpenAlex, arXiv, PDF hosts) and canned responses.
 
-The app sends every outgoing request through one shared httpx client
-(app.services.http.get_client). The tests replace that client with one whose
-transport is FakeUpstream.handle, so no request ever leaves the machine.
+The app sends its outgoing requests with httpx. The `upstream` fixture (conftest.py)
+replaces the network layer of every httpx.AsyncClient with FakeUpstream.handle_async,
+so no request ever leaves the machine, whichever client or module sends it.
 """
 
-from collections.abc import Callable
+import inspect
+from collections.abc import Awaitable, Callable
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 import httpx
 
-Handler = Callable[[httpx.Request], httpx.Response]
+# A handler may also be a coroutine function, e.g. to hold a response back.
+Handler = Callable[[httpx.Request], httpx.Response | Awaitable[httpx.Response]]
 
 OPENALEX_WORKS = "https://api.openalex.org/works"
 ARXIV_QUERY = "https://export.arxiv.org/api/query"
@@ -54,12 +56,13 @@ class FakeUpstream:
         parts = urlsplit(url)
         return [r for r in self.requests if _host(r) == parts.hostname and r.url.path == (parts.path or "/")]
 
-    def handle(self, request: httpx.Request) -> httpx.Response:
+    async def handle_async(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         host = _host(request)
         for method, route_host, path, handler in reversed(self._routes):
             if method == request.method and route_host == host and path == request.url.path:
-                return handler(request)
+                response = handler(request)
+                return await response if inspect.isawaitable(response) else response
         self.unexpected.append(f"{request.method} {request.url} (Host: {host})")
         return httpx.Response(599, text="No fake upstream is registered for this URL.")
 
@@ -118,8 +121,10 @@ def arxiv_entry(
     summary: str = "  The dominant sequence transduction models are based on complex recurrent\n  networks.  ",
     doi: str | None = "10.48550/arXiv.1706.03762",
     journal_ref: str | None = "NeurIPS 2017",
+    pdf_url: str | None = None,
 ) -> str:
-    """One <entry> of an arXiv Atom feed."""
+    """One <entry> of an arXiv Atom feed. The PDF link is arXiv's own unless `pdf_url` is given."""
+    pdf_url = pdf_url or f"http://arxiv.org/pdf/{arxiv_id}"
     parts = [
         "<entry>",
         f"<id>http://arxiv.org/abs/{arxiv_id}</id>",
@@ -130,7 +135,7 @@ def arxiv_entry(
         f"<arxiv:doi>{escape(doi)}</arxiv:doi>" if doi else "",
         f"<arxiv:journal_ref>{escape(journal_ref)}</arxiv:journal_ref>" if journal_ref else "",
         f'<link href="http://arxiv.org/abs/{arxiv_id}" rel="alternate" type="text/html"/>',
-        f'<link title="pdf" href="http://arxiv.org/pdf/{arxiv_id}" rel="related" type="application/pdf"/>',
+        f'<link title="pdf" href="{escape(pdf_url)}" rel="related" type="application/pdf"/>',
         "</entry>",
     ]
     return "".join(parts)

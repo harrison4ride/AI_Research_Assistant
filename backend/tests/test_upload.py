@@ -9,6 +9,9 @@ import hashlib
 import httpx
 import pytest
 
+from app.db import SessionLocal
+from app.models import Paper
+from app.services import fulltext
 from app.services.llm import ExtractedMetadata
 from support import pdfs
 from support.papers import BERT_META, save, upload, upload_sample
@@ -46,13 +49,20 @@ def test_upload_extracts_metadata_from_the_pdf_layout(client, fake_llm):
     assert [p["id"] for p in client.get("/api/papers").json()] == [paper["id"]]
 
 
-def test_upload_asks_the_llm_with_the_text_of_the_first_pages(client, fake_llm):
-    upload_sample(client)
+def test_upload_asks_the_llm_with_the_text_of_the_first_pages_only(client, fake_llm):
+    # README: "the first pages go to Anthropic for metadata extraction".
+    last_line = "This closing sentence is on the last page only."
+    data = pdfs.long_paper_pdf(extra_pages=10, last_line=last_line)  # about 40,000 characters
+
+    paper = upload(client, data).json()
 
     [first_pages] = fake_llm.metadata_requests
-    assert first_pages.startswith("Retrieval Helps Language Models")
-    assert pdfs.BODY_MARKER in first_pages  # page 2 is included
-    assert len(first_pages) <= 15000
+    with SessionLocal() as session:
+        full_text = session.get(Paper, paper["id"]).full_text
+    assert last_line in full_text and paper["page_count"] == 11
+    assert full_text.startswith(first_pages)  # the beginning of the paper, unchanged
+    assert pdfs.SAMPLE_ABSTRACT[:60] in first_pages
+    assert last_line not in first_pages
 
 
 def test_uploaded_pdf_is_stored_and_served_back(client, fake_llm, settings):
@@ -130,10 +140,32 @@ def test_pdf_metadata_title_and_authors_are_used(client, fake_llm):
     assert paper["authors"] == ["Eve Adams", "Frank Moore"]
 
 
-def test_placeholder_title_in_pdf_properties_is_ignored(client, fake_llm):
-    data = pdfs.paper_pdf(metadata={"title": "Microsoft Word - draft3.docx"})
+@pytest.mark.parametrize("placeholder", [
+    "Microsoft Word - draft3.docx", "untitled", "Document1", "paper", "main", "arXiv", "main.pdf", "paper.tex"])
+def test_placeholder_title_in_pdf_properties_is_ignored(client, fake_llm, placeholder):
+    data = pdfs.paper_pdf(metadata={"title": placeholder})
 
     assert upload(client, data).json()["title"] == pdfs.SAMPLE_TITLE
+
+
+PLACEHOLDER_PREFIX_BUG = pytest.mark.xfail(strict=True, reason=(
+    "Suspected app bug: JUNK_META_TITLE in app/services/pdf.py has no end anchor after the "
+    "placeholder words, so any real title that merely starts with Main, Paper, Document, or "
+    "arXiv is discarded as a placeholder."))
+
+
+@pytest.mark.parametrize("real_title", [
+    pytest.param("Paper Recommendation with Graph Neural Networks", marks=PLACEHOLDER_PREFIX_BUG),
+    pytest.param("Main Memory Databases Revisited for Modern Hardware", marks=PLACEHOLDER_PREFIX_BUG),
+    pytest.param("Document Layout Analysis at Web Scale", marks=PLACEHOLDER_PREFIX_BUG),
+    pytest.param("arXiv Usage Statistics over Two Decades", marks=PLACEHOLDER_PREFIX_BUG),
+    "Untangling Placeholder Titles in PDF Files",
+])
+def test_a_real_title_in_pdf_properties_is_kept_whatever_word_it_starts_with(client, fake_llm, real_title):
+    # pdf.py filters only "placeholder titles that PDF producers write into the metadata".
+    data = pdfs.paper_pdf(metadata={"title": real_title})
+
+    assert upload(client, data).json()["title"] == real_title
 
 
 # --- arXiv PDFs -----------------------------------------------------------------------------------
@@ -170,6 +202,36 @@ def test_arxiv_id_of_a_cited_paper_is_not_trusted(client, fake_llm, upstream):
     assert paper["title"] == pdfs.SAMPLE_TITLE
     assert paper["authors"] == pdfs.SAMPLE_AUTHORS
     assert paper["doi"] is None
+    # arXiv's answer was rejected, so the first pages went to the model instead.
+    assert len(fake_llm.metadata_requests) == 1
+
+
+def test_an_arxiv_id_that_arxiv_does_not_know_falls_back_to_the_model(client, fake_llm, upstream):
+    upstream.text(ARXIV_QUERY, arxiv_feed([], total=0))
+    fake_llm.metadata = ExtractedMetadata(title=pdfs.SAMPLE_TITLE, authors=["Alice Smith"], year=2023,
+                                          abstract=LONG_ABSTRACT)
+    data = pdfs.paper_pdf(margin_stamp=ARXIV_STAMP)
+
+    paper = upload(client, data).json()
+
+    assert len(upstream.sent_to(ARXIV_QUERY)) == 1
+    assert len(fake_llm.metadata_requests) == 1
+    assert (paper["authors"], paper["abstract"]) == (["Alice Smith"], LONG_ABSTRACT)
+
+
+def test_upload_during_an_arxiv_pause_skips_the_lookup(client, fake_llm, upstream):
+    # README: "During a pause, searches fail at once with a message, and uploads skip the arXiv
+    # metadata lookup."
+    upstream.get(ARXIV_QUERY, lambda request: httpx.Response(429))
+    assert client.get("/api/search", params={"q": "x", "source": "arxiv"}).status_code == 429
+    data = pdfs.paper_pdf(title_lines=["Attention Is All You Need"], margin_stamp=ARXIV_STAMP)
+
+    response = upload(client, data)
+
+    assert response.status_code == 201
+    assert response.json()["title"] == "Attention Is All You Need"
+    assert len(upstream.sent_to(ARXIV_QUERY)) == 1  # only the search that started the pause
+    assert len(fake_llm.metadata_requests) == 1
 
 
 def test_upload_still_works_when_arxiv_is_unavailable(client, fake_llm, upstream):
@@ -238,6 +300,17 @@ def test_upload_without_a_file_is_rejected(client):
     assert client.post("/api/papers/upload").status_code == 422
 
 
+def test_up_to_1_kb_of_junk_before_the_pdf_header_is_tolerated(client, fake_llm):
+    # fulltext.looks_like_pdf: "The header may be preceded by a little junk; PDF readers tolerate up to 1 KB."
+    junk = b"\r\n" * 512
+    tolerated = junk[:1024 - len(b"%PDF-")] + pdfs.sample_pdf()  # the header ends at byte 1024
+    too_much = junk[:1024 - len(b"%PDF-") + 1] + pdfs.sample_pdf()
+
+    assert upload(client, tolerated).status_code == 201
+    response = upload(client, too_much)
+    assert (response.status_code, response.json()["detail"]) == (415, "The file is not a PDF.")
+
+
 # --- Attaching a PDF to a search result ---------------------------------------------------------------
 
 
@@ -268,14 +341,44 @@ def test_attaching_another_pdf_replaces_the_old_file(client, settings):
     assert [f.name for f in stored_files(settings)] == [f"{hashlib.sha256(second_pdf).hexdigest()}.pdf"]
 
 
-def test_attach_rejects_non_pdfs(client):
+@pytest.mark.parametrize(("data", "status", "detail"), [
+    (b"not a pdf", 415, "The file is not a PDF."),
+    (pdfs.corrupt_pdf(), 422, "The file could not be read as a PDF."),
+    (pdfs.encrypted_pdf(), 422, "The PDF is password-protected."),
+    (pdfs.blank_pdf(), 422, "No text could be extracted. The PDF may be a scanned image."),
+    (pdfs.sample_pdf() + b"%" * (1024 * 1024), 413, "The file is larger than 1 MB."),
+])
+def test_a_refused_attachment_leaves_the_paper_unchanged(client, settings, monkeypatch, data, status, detail):
+    monkeypatch.setattr(settings, "max_pdf_mb", 1)
     paper = save(client, BERT_META)
+    client.post(f"/api/papers/{paper['id']}/fulltext")  # no PDF link: only the abstract
+    before = client.get(f"/api/papers/{paper['id']}").json()
+
+    response = client.post(f"/api/papers/{paper['id']}/pdf", files={"file": ("x.pdf", data, "application/pdf")})
+
+    assert (response.status_code, response.json()["detail"]) == (status, detail)
+    assert client.get(f"/api/papers/{paper['id']}").json() == before
+    assert stored_files(settings) == []
+
+
+def test_attaching_to_a_paper_deleted_meanwhile_is_404_and_keeps_no_file(client, settings, monkeypatch):
+    paper = save(client, BERT_META)
+    real_store_pdf = fulltext.store_pdf
+
+    def store_after_the_paper_was_deleted(data):
+        with SessionLocal() as session:  # the user removes the paper while the PDF is being read
+            session.delete(session.get(Paper, paper["id"]))
+            session.commit()
+        return real_store_pdf(data)
+
+    monkeypatch.setattr(fulltext, "store_pdf", store_after_the_paper_was_deleted)
 
     response = client.post(f"/api/papers/{paper['id']}/pdf",
-                           files={"file": ("x.pdf", b"not a pdf", "application/pdf")})
+                           files={"file": ("bert.pdf", pdfs.sample_pdf(), "application/pdf")})
 
-    assert response.status_code == 415
-    assert client.get(f"/api/papers/{paper['id']}").json()["has_pdf"] is False
+    assert (response.status_code, response.json()["detail"]) == (404, "Paper not found.")
+    assert stored_files(settings) == []
+    assert client.get(f"/api/papers/{paper['id']}").status_code == 404
 
 
 def test_attach_to_unknown_paper(client):
@@ -295,3 +398,13 @@ def test_pdf_of_a_paper_without_one_is_404(client):
 
 def test_pdf_of_unknown_paper_is_404(client):
     assert client.get("/api/papers/999999/pdf").status_code == 404
+
+
+def test_pdf_whose_stored_file_is_gone_is_404(client, fake_llm, settings):
+    paper = upload_sample(client)
+    for stored in stored_files(settings):
+        stored.unlink()
+
+    response = client.get(f"/api/papers/{paper['id']}/pdf")
+
+    assert (response.status_code, response.json()["detail"]) == (404, "No local PDF for this paper.")

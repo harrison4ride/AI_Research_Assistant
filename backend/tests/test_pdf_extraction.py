@@ -105,15 +105,15 @@ def test_cited_arxiv_id_is_reported_when_there_is_no_stamp():
     assert pdf.extract(data).arxiv_id == "1810.04805"
 
 
-def test_only_the_first_300_pages_are_read():
-    doc = pymupdf.open()
-    for number in range(1, 303):
-        doc.new_page().insert_text((72, 72), f"Page marker {number}. {FILLER}"[:90], fontsize=9)
+def test_text_is_read_from_a_limited_number_of_pages():
+    # The page limit keeps huge PDFs fast; test_summary.py checks that the cut is disclosed.
+    limit = pdf.MAX_PDF_PAGES_FOR_TEXT
 
-    extracted = pdf.extract(doc.tobytes())
+    extracted = pdf.extract(pdfs.numbered_pages_pdf(limit + 2))
 
-    assert extracted.page_count == 302
-    assert "Page marker 300." in extracted.text and "Page marker 301." not in extracted.text
+    assert extracted.page_count == limit + 2
+    assert f"Page marker {limit}." in extracted.text
+    assert f"Page marker {limit + 1}." not in extracted.text
 
 
 @pytest.mark.parametrize(("data", "message"), [
@@ -203,14 +203,31 @@ def test_locate_headings_in_reading_order():
     found = pdf.locate_headings(pdfs.sample_pdf(), ["Introduction", "2. Method", "Experiments", "Not In This Paper"])
 
     assert [spot[0] if spot else None for spot in found] == [1, 2, 2, None]
-    assert all(0 <= spot[1] <= 1 for spot in found if spot)
+    # On page 2, "Experiments" is drawn below "Method".
+    assert 0 < found[1][1] < found[2][1] < 1
 
 
-def test_heading_beats_an_earlier_mention_in_the_text():
-    # Page 1 says "Our method retrieves ..." in the abstract; the heading "2 Method" is on page 2.
-    [(page, _)] = pdf.locate_headings(pdfs.sample_pdf(), ["Method"])
+def test_headings_are_searched_forward_from_the_previous_one():
+    # The model lists sections in reading order: a heading is not looked for before the previous one.
+    found = pdf.locate_headings(pdfs.sample_pdf(), ["Experiments", "Introduction"])
 
-    assert page == 2
+    assert [spot[0] if spot else None for spot in found] == [2, None]
+
+
+MENTION = "We describe the Retrieval Setup in a later section of this paper, after the method."
+
+
+@pytest.mark.parametrize(("sections", "expected_page"), [
+    # A heading that starts with the title beats a mention in running text, even an earlier one.
+    ([("1 Introduction", MENTION, 1), ("2 Method", FILLER, 2), ("3 Retrieval Setup and Index", FILLER, 2)], 2),
+    # A heading equal to the title beats both.
+    ([("1 Introduction", MENTION, 1), ("2 Retrieval Setup and Index", FILLER, 2),
+      ("3 Experiments", FILLER, 2), ("4 Retrieval Setup", FILLER, 3)], 3),
+], ids=["heading starting with the title", "heading equal to the title"])
+def test_the_best_match_for_a_heading_wins(sections, expected_page):
+    [(page, _)] = pdf.locate_headings(pdfs.paper_pdf(sections=sections), ["Retrieval Setup"])
+
+    assert page == expected_page
 
 
 def test_heading_search_ignores_case_punctuation_and_section_numbers():

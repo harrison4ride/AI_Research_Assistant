@@ -16,6 +16,13 @@ function setup(current: Paper, quietWhenOk = false) {
 
 const withPdf = paper({ id: 2, has_pdf: true, page_count: 12, full_text_status: 'ok', full_text_error: null })
 
+// The hidden file input that "Attach PDF" opens.
+function filePicker(): HTMLInputElement {
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+  if (!input) throw new Error('No file picker is offered')
+  return input
+}
+
 describe('FullTextStatus', () => {
   it('downloads the PDF the first time a paper is viewed', async () => {
     const api = mockFetch()
@@ -66,21 +73,45 @@ describe('FullTextStatus', () => {
   it('attaches a PDF the user has', async () => {
     const { api, user, onChange } = setup(paper({ id: 2, full_text_status: 'unavailable' }))
     api.on('POST', '/api/papers/2/pdf', withPdf)
+    const picker = filePicker()
+    const openPicker = vi.spyOn(picker, 'click')
 
-    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, pdfFile('bert.pdf'))
+    await user.click(screen.getByRole('button', { name: 'Attach PDF' }))
+    expect(openPicker).toHaveBeenCalledOnce() // the button opens the file picker
+    expect(picker).toHaveAttribute('accept', 'application/pdf,.pdf')
+    await user.upload(picker, pdfFile('bert.pdf')) // the user picks a file
 
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ full_text_status: 'ok' })))
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith({ has_pdf: true, page_count: 12, full_text_status: 'ok', full_text_error: null }),
+    )
     const form = api.callsTo('POST', '/api/papers/2/pdf')[0].body as FormData
     expect((form.get('file') as File).name).toBe('bert.pdf')
   })
 
   it('shows why an attached file was refused', async () => {
-    const { api, user } = setup(paper({ id: 2, full_text_status: 'unavailable' }))
+    const { api, user, onChange } = setup(paper({ id: 2, full_text_status: 'unavailable' }))
     api.on('POST', '/api/papers/2/pdf', errorResponse(415, 'The file is not a PDF.'))
 
-    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, pdfFile('fake.pdf'))
+    await user.upload(filePicker(), pdfFile('fake.pdf'))
 
     expect(await screen.findByText('The file is not a PDF.')).toBeInTheDocument()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  // Suspected app bug: after any error, FullTextStatus shows only the error and a "Retry" link
+  // that retries the download; the Attach PDF button and its file input are gone. A user who
+  // picked the wrong file must click "Retry" (a download retry) before attaching again.
+  it.fails('lets the user attach another file after a refused one', async () => {
+    const { api, user, onChange } = setup(paper({ id: 2, full_text_status: 'unavailable' }))
+    api.on('POST', '/api/papers/2/pdf', errorResponse(415, 'The file is not a PDF.'))
+    await user.upload(filePicker(), pdfFile('notes.pdf'))
+    await screen.findByText('The file is not a PDF.')
+    api.on('POST', '/api/papers/2/pdf', withPdf)
+
+    await user.click(screen.getByRole('button', { name: 'Attach PDF' }))
+    await user.upload(filePicker(), pdfFile('bert.pdf'))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ full_text_status: 'ok' })))
   })
 
   it('offers a retry when the first download request fails', async () => {

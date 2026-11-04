@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   apiFetch,
+  attachPdf,
   deletePaper,
   fetchFullText,
   listPapers,
@@ -12,7 +13,7 @@ import {
   updatePaper,
   uploadPdf,
 } from './api'
-import { errorResponse, jsonResponse, mockFetch, ndjsonChunks } from './test/fetchMock'
+import { errorResponse, jsonResponse, mockFetch, ndjson, ndjsonChunks } from './test/fetchMock'
 import { pdfFile, searchResult } from './test/fixtures'
 import type { StreamEvent } from './types'
 
@@ -109,15 +110,21 @@ describe('requests', () => {
     expect(api.calls[0].init?.headers).toEqual({ 'Content-Type': 'application/json' })
   })
 
-  it('uploads a PDF as multipart form data', async () => {
-    const api = mockFetch().on('POST', '/api/papers/upload', jsonResponse({ id: 8 }, 201))
+  it.each([
+    ['uploads', '/api/papers/upload', (file: File) => uploadPdf(file)],
+    ['attaches', '/api/papers/4/pdf', (file: File) => attachPdf(4, file)],
+  ])('%s a PDF as multipart form data', async (_, path, send) => {
+    const api = mockFetch().on('POST', path, jsonResponse({ id: 8 }, 201))
     const file = pdfFile('my paper.pdf')
 
-    await uploadPdf(file)
+    await send(file)
 
-    const form = api.calls[0].body as FormData
+    const [call] = api.calls
+    const form = call.body as FormData
     expect(form).toBeInstanceOf(FormData)
-    expect((form.get('file') as File).name).toBe('my paper.pdf')
+    expect(form.get('file')).toBe(file)
+    // The browser must write the Content-Type itself: only it knows the multipart boundary.
+    expect(new Headers(call.init?.headers).has('Content-Type')).toBe(false)
   })
 
   it('edits metadata with PATCH', async () => {
@@ -191,12 +198,25 @@ describe('streamed answers', () => {
   })
 
   it('passes a cancellation through instead of calling it a network error', async () => {
+    // Like a browser, this fetch rejects only when the request's own signal is aborted.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            const signal = init?.signal
+            if (!signal) return resolve(ndjson([{ type: 'done' }]))
+            signal.addEventListener('abort', () => reject(signal.reason))
+          }),
+      ),
+    )
     const controller = new AbortController()
-    const abort = new DOMException('The operation was aborted.', 'AbortError')
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abort))
+
+    const answer = streamSummary(7, null, () => {}, controller.signal)
     controller.abort()
 
-    await expect(streamSummary(7, null, () => {}, controller.signal)).rejects.toBe(abort)
+    await expect(answer).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(answer).rejects.not.toBeInstanceOf(ApiError)
   })
 
   it('reports an unreachable backend', async () => {

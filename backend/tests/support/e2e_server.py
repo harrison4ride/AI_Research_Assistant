@@ -8,13 +8,16 @@ and deletes RUN_DIR afterwards. What is real and what is fake:
 - Real: the FastAPI app, SQLite, PDF extraction, the NDJSON streaming, and the
   Claude Code provider's subprocess handling. The built UI is served on the same port.
 - Fake: OpenAlex and arXiv (a local server with canned results), and the `claude`
-  CLI (tests/support/fake_claude.py), so no model is ever called.
+  CLI (tests/support/fake_claude.py), so no model is ever called. No canned result
+  links to a PDF on the internet.
 - The repository's .env is not read; the database lives in RUN_DIR/data.
+- For the tests only, POST /__e2e__/reset deletes every paper (saved or only opened),
+  its conversation and PDF, and forgets cached search results, so that no test sees
+  what an earlier one left behind.
 """
 
 import argparse
 import json
-import os
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +28,7 @@ TESTS_DIR = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(TESTS_DIR.parent), str(TESTS_DIR)]
 
 from support import fake_claude  # noqa: E402
+from support.isolation import isolate_settings  # noqa: E402
 from support.upstream import arxiv_entry, arxiv_feed, openalex_page, openalex_work  # noqa: E402
 
 # What the fake OpenAlex returns for any query. No PDF links, so nothing is downloaded.
@@ -54,7 +58,10 @@ WORKS = [
         venue="Empirical Methods in Natural Language Processing",
     ),
 ]
-ARXIV_FEED = arxiv_feed([arxiv_entry()], total=1)
+# The PDF link is on a documentation-only address (RFC 5737): the app refuses it as
+# non-public without connecting, so opening this result never uses the internet.
+ARXIV_PDF_URL = "http://192.0.2.10/pdf/1706.03762v7"
+ARXIV_FEED = arxiv_feed([arxiv_entry(pdf_url=ARXIV_PDF_URL)], total=1)
 
 
 class FakeSearchApis(BaseHTTPRequestHandler):
@@ -97,23 +104,12 @@ def main() -> None:
     fake_cli = fake_claude.install(run_dir / "bin")
 
     # Settings, before the app reads them.
-    from app import config
-
-    for name in [*config.Settings.model_fields, "anthropic_auth_token", "anthropic_profile", "claudecode"]:
-        os.environ.pop(name.upper(), None)
-        os.environ.pop(name, None)
-    os.environ.update({
-        "DATA_DIR": str(run_dir / "data"),
-        "FRONTEND_DIST": str(run_dir / "dist"),
-        "SERVE_FRONTEND": "true",
-        "LLM_PROVIDER": "claude-code",
-        "CLAUDE_CODE_PATH": str(fake_cli),
-        "CLAUDE_CODE_MODEL": "opus",
-        "ANTHROPIC_API_KEY": "test-key-not-real",
-        "ANTHROPIC_BASE_URL": "http://127.0.0.1:9",
-    })
-    config.Settings.model_config["env_file"] = None
-    config.get_settings.cache_clear()
+    isolate_settings(
+        data_dir=run_dir / "data",
+        claude_code_path=fake_cli,
+        frontend_dist=run_dir / "dist",
+        serve_frontend="true",
+    )
 
     fake_apis = ThreadingHTTPServer(("127.0.0.1", 0), FakeSearchApis)
     threading.Thread(target=fake_apis.serve_forever, daemon=True).start()
@@ -129,7 +125,31 @@ def main() -> None:
 
     if not frontend_built:
         sys.exit(f"No frontend build in {run_dir / 'dist'}")
+    add_reset_route(app)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+
+
+def add_reset_route(app) -> None:
+    """POST /__e2e__/reset: forget every paper, conversation, PDF, and cached search."""
+    import shutil
+
+    from fastapi import Response
+    from sqlalchemy import delete
+
+    from app.config import get_settings
+    from app.db import SessionLocal
+    from app.models import ChatMessage, Paper
+    from app.routers import search
+
+    @app.post("/__e2e__/reset", include_in_schema=False)
+    def reset() -> Response:
+        with SessionLocal() as db:
+            db.execute(delete(ChatMessage))
+            db.execute(delete(Paper))
+            db.commit()
+        shutil.rmtree(get_settings().pdf_dir, ignore_errors=True)
+        search._cache.clear()
+        return Response(status_code=204)
 
 
 if __name__ == "__main__":

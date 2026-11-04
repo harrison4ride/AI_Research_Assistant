@@ -15,6 +15,14 @@ import pytest
 
 from app.services import claude_code, llm
 from app.services.llm import ExtractedMetadata, LlmError, StreamResult
+from support.fake_anthropic import (
+    FakeAnthropic,
+    FakeMessageStream,
+    fallback_event,
+    final,
+    text_block,
+    text_event,
+)
 
 
 def context(full_text: str | None = "Full paper text.", abstract: str | None = "The abstract."):
@@ -34,18 +42,25 @@ QUESTION = [{"role": "user", "content": "What is new?"}]
 # --- The paper context ------------------------------------------------------------------
 
 
+def tag(block: str, name: str) -> str:
+    return re.search(rf"<{name}>\n?(.*?)\n?</{name}>", block, re.DOTALL).group(1)
+
+
 def test_context_with_full_text():
     ctx = context()
 
     assert (ctx.kind, ctx.truncated) == ("full_text", False)
-    assert ctx.system[0] == {"type": "text", "text": llm.INSTRUCTIONS}
-    assert ctx.system[1] == {"type": "text", "text": ctx.paper, "cache_control": {"type": "ephemeral"}}
-    assert ctx.paper == "\n".join([
-        "<paper>", "<title>A Paper</title>", "<authors>Ann Author</authors>", "<year>2024</year>",
-        "<source_note>Full text extracted from the PDF (9 pages).</source_note>",
-        "<text>", "Full paper text.", "</text>", "</paper>",
-    ])
-    assert ctx.system_text == f"{llm.INSTRUCTIONS}\n\n{ctx.paper}"
+    assert (tag(ctx.paper, "title"), tag(ctx.paper, "authors"), tag(ctx.paper, "year")) == (
+        "A Paper", "Ann Author", "2024")
+    assert tag(ctx.paper, "text") == "Full paper text."
+    assert re.search(r"\b9 pages\b", tag(ctx.paper, "source_note"))
+    assert "abstract" not in tag(ctx.paper, "source_note").lower()
+    # API: the instructions, then the paper behind a prompt-cache breakpoint.
+    assert [block["text"] for block in ctx.system] == [llm.INSTRUCTIONS, ctx.paper]
+    assert "cache_control" not in ctx.system[0]
+    assert ctx.system[1]["cache_control"] == {"type": "ephemeral"}
+    # Claude Code: the same instructions and paper in one system prompt.
+    assert llm.INSTRUCTIONS in ctx.system_text and ctx.paper in ctx.system_text
 
 
 def test_context_cuts_off_long_papers(settings, monkeypatch):
@@ -146,9 +161,9 @@ def fake_run(monkeypatch):
     state = SimpleNamespace(chunks=["Hello ", "world."], text=None, model="claude-opus-5", stop_reason="end_turn",
                             error=None, calls=[])
 
-    async def run(system_prompt, prompt, *, model, effort, outcome, timeout=600.0):
+    async def run(system_prompt, prompt, *, model, effort, outcome, **options):
         state.calls.append({"system_prompt": system_prompt, "prompt": prompt, "model": model, "effort": effort,
-                            "timeout": timeout})
+                            **options})
         for chunk in state.chunks:
             yield chunk
         if state.error:
@@ -169,8 +184,8 @@ async def test_claude_code_answer_streams_and_names_the_model(fake_run):
     assert events == [("text", "Hello "), ("text", "world.")]
     assert result == StreamResult(text="Hello world.", model="claude-opus-5 via Claude Code", stop_reason="end_turn")
     [call] = fake_run.calls
-    assert call == {"system_prompt": ctx.system_text, "prompt": "What is new?", "model": "sonnet",
-                    "effort": "medium", "timeout": 600.0}
+    assert {key: call[key] for key in ("system_prompt", "prompt", "model", "effort")} == {
+        "system_prompt": ctx.system_text, "prompt": "What is new?", "model": "sonnet", "effort": "medium"}
 
 
 async def test_claude_code_label_falls_back_to_the_requested_model(fake_run):
@@ -203,81 +218,7 @@ async def test_claude_code_empty_answer(fake_run):
         await collect(context(), QUESTION)
 
 
-async def test_claude_code_errors_reach_the_user_unchanged(fake_run):
-    fake_run.error = claude_code.ClaudeCodeError("Claude Code did not finish in time. Try again.")
-
-    with pytest.raises(LlmError, match="Claude Code did not finish in time. Try again."):
-        await collect(context(), QUESTION)
-
-
 # --- The Anthropic API provider (fake client) -------------------------------------------------
-
-
-class FakeMessageStream:
-    def __init__(self, events, final, error=None):
-        self.events, self.final, self.error = events, final, error
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc_info):
-        return False
-
-    async def __aiter__(self):
-        for event in self.events:
-            yield event
-        if self.error:
-            raise self.error
-
-    async def get_final_message(self):
-        return self.final
-
-
-class FakeAnthropic:
-    """Just the parts of anthropic.AsyncAnthropic that the app uses."""
-
-    def __init__(self):
-        self.stream = None  # the FakeMessageStream to return next
-        self.stream_error = None
-        self.stream_params: list[dict] = []
-        self.parse_result = None
-        self.parse_error = None
-        self.parse_params: list[dict] = []
-        self.options: dict | None = None
-        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream, parse=self._parse))
-
-    def with_options(self, **options):
-        self.options = options
-        return self
-
-    def _stream(self, **params):
-        self.stream_params.append(params)
-        if self.stream_error:
-            raise self.stream_error
-        return self.stream
-
-    async def _parse(self, **params):
-        self.parse_params.append(params)
-        if self.parse_error:
-            raise self.parse_error
-        return self.parse_result
-
-
-def text_event(text):
-    return SimpleNamespace(type="text", text=text)
-
-
-def fallback_event():
-    return SimpleNamespace(type="content_block_start", content_block=SimpleNamespace(type="fallback"))
-
-
-def final(*blocks, stop_reason="end_turn", model="claude-opus-5"):
-    usage = SimpleNamespace(input_tokens=10, cache_read_input_tokens=0, cache_creation_input_tokens=8, output_tokens=4)
-    return SimpleNamespace(content=list(blocks), stop_reason=stop_reason, model=model, usage=usage)
-
-
-def text_block(text):
-    return SimpleNamespace(type="text", text=text)
 
 
 @pytest.fixture
@@ -343,13 +284,36 @@ async def test_api_answer_cut_off_at_the_length_limit(api):
 
     _, [result] = await collect(context(), QUESTION)
 
-    assert result.text.endswith("*(The answer was cut off because it reached the length limit.)*")
+    assert result.text == "Long\n\n*(The answer was cut off because it reached the length limit.)*"
 
 
 async def test_api_empty_answer(api):
     api.stream = FakeMessageStream([], final(text_block("   ")))
 
     with pytest.raises(LlmError, match="The model returned an empty answer."):
+        await collect(context(), QUESTION)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "Suspected app bug: both providers append the cut-off note before the empty-answer check "
+    "(llm._stream_claude_code and llm._stream_api), so an answer with no text that stopped at "
+    "the length limit is saved as just the note instead of being reported as an empty answer."))
+@pytest.mark.parametrize("provider", ["claude-code", "api"])
+async def test_an_empty_answer_cut_off_at_the_length_limit_is_an_error(settings, monkeypatch, provider):
+    if provider == "api":
+        fake = FakeAnthropic()
+        fake.stream = FakeMessageStream([], final(stop_reason="max_tokens"))  # thinking used up every token
+        monkeypatch.setattr(settings, "llm_provider", "api")
+        monkeypatch.setattr(llm, "get_client", lambda: fake)
+    else:
+        async def run(system_prompt, prompt, *, outcome, **options):
+            outcome.text, outcome.stop_reason = "", "max_tokens"
+            return
+            yield
+
+        monkeypatch.setattr(claude_code, "run", run)
+
+    with pytest.raises(LlmError, match="The model returned an empty answer. Try again."):
         await collect(context(), QUESTION)
 
 
@@ -452,9 +416,12 @@ async def test_metadata_from_claude_code(ready_claude_code):
 
     assert meta == ExtractedMetadata(**METADATA)
     [call] = ready_claude_code.calls
+    # An upload waits for this call, so it is quick: low effort and a short timeout.
     assert (call["model"], call["effort"], call["timeout"]) == ("opus", "low", 45.0)
     assert f"<pages>\n{PAGES}\n</pages>" in call["prompt"]
     assert "not instructions to you" in call["system_prompt"]
+    # Claude Code adds the user's email and machine details; the model must not repeat them (README).
+    assert "Never include the user's email address" in call["system_prompt"]
 
 
 @pytest.mark.parametrize(("reply", "expected"), [
@@ -488,6 +455,17 @@ async def test_metadata_from_the_api(api):
     assert PAGES in params["messages"][0]["content"]
 
 
+async def test_api_metadata_with_haiku_sends_no_effort(api, settings, monkeypatch):
+    # INSTALL.md: LLM_EFFORT is "not used for Claude Haiku 4.5 in `api` mode, which does not support it".
+    monkeypatch.setattr(settings, "llm_model", "claude-haiku-4-5")
+    api.parse_result = SimpleNamespace(stop_reason="end_turn", parsed_output=ExtractedMetadata(**METADATA))
+
+    assert await llm.extract_metadata(PAGES) == ExtractedMetadata(**METADATA)
+    [params] = api.parse_params
+    assert params["model"] == "claude-haiku-4-5"
+    assert "output_config" not in params
+
+
 async def test_api_metadata_needs_credentials(api, settings, monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "anthropic_api_key", None)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -518,8 +496,9 @@ async def test_section_summaries_are_matched_by_number(fake_llm):
 
     assert items == [{"title": "Intro", "summary": "First."}, {"title": "Method", "summary": "Second section."}]
     assert model == "fake-model-1"
-    assert '<headings>\n[{"n": 1, "heading": "Intro"}, {"n": 2, "heading": "Method"}]\n</headings>' in (
-        fake_llm.calls[0].prompt)
+    prompt = fake_llm.calls[0].prompt
+    headings = json.loads(prompt[prompt.index("<headings>\n") + len("<headings>\n"):prompt.index("\n</headings>")])
+    assert headings == [{"n": 1, "heading": "Intro"}, {"n": 2, "heading": "Method"}]
 
 
 @pytest.mark.parametrize("reply", [
