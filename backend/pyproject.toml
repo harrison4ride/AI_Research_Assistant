@@ -17,3 +17,22 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+]
+
+[tool.pytest.ini_options]
+# `uv run pytest` in backend/ runs the whole suite. tests/conftest.py isolates the
+# tests from .env, the real database, the network, and any real LLM.
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra"
+filterwarnings = [
+    # Emitted by PyMuPDF's SWIG bindings at import; not about this app.
+    "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
+]
