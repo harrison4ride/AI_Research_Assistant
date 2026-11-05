@@ -8,6 +8,7 @@ Run as a script for the Playwright tests:
 
 import json
 import sys
+from dataclasses import dataclass
 from functools import cache
 
 import pymupdf
@@ -195,6 +196,78 @@ def unstructured_pdf(paragraphs: list[str], start_y: float = 430) -> bytes:
             y = 90
         y = _paragraph(doc[-1], y, text) + 12
     return doc.tobytes()
+
+
+@dataclass
+class Text:
+    """One line of text for layout_pdf, at `y` points from the top of the page (its baseline).
+
+    `font` is a PyMuPDF base-14 name: helv (Helvetica), hebo (bold), heit (italic), hebi (bold
+    italic), tiro (Times). `rotate=90` draws it upward, like the arXiv stamp in the margin.
+    """
+
+    y: float
+    text: str
+    size: float = 10
+    font: str = "helv"
+    x: float = LEFT
+    rotate: int = 0
+
+
+def wrapped(y: float, text: str, size: float = 10, font: str = "helv", width: int = 90) -> list[Text]:
+    """A paragraph of `text` wrapped at `width` characters, its first line at `y`."""
+    lines, line = [], ""
+    for word in text.split():
+        if line and len(line) + 1 + len(word) > width:
+            lines.append(line)
+            line = word
+        else:
+            line = f"{line} {word}" if line else word
+    lines.append(line)
+    return [Text(y + n * size * 1.35, line, size, font) for n, line in enumerate(lines)]
+
+
+def layout_pdf(*pages: list[Text], sizes: list[tuple[float, float]] | None = None,
+               metadata: dict[str, str] | None = None, font_names: dict[str, str] | None = None,
+               images: dict[int, pymupdf.Rect] | None = None) -> bytes:
+    """A PDF with exactly the given lines on each page.
+
+    `sizes` gives (width, height) per page (US Letter by default). `font_names` renames fonts
+    in the file, e.g. {"Times-Roman": "Inter-Medium"} for text in a medium weight that PDF
+    readers do not flag as bold. `images` puts a small picture on a page (index: where).
+    """
+    doc = pymupdf.open()
+    for n, _ in enumerate(pages):
+        width, height = sizes[n] if sizes else (PAGE_WIDTH, PAGE_HEIGHT)
+        doc.new_page(width=width, height=height)
+    for n, lines in enumerate(pages):
+        page = doc[n]
+        for line in lines:
+            page.insert_text((line.x, line.y), line.text, fontsize=line.size, fontname=line.font, rotate=line.rotate)
+    for n, where in (images or {}).items():
+        picture = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 16, 16), False)
+        picture.set_rect(picture.irect, (40, 90, 200))
+        doc[n].insert_image(where, pixmap=picture)
+    for n in range(len(pages)):
+        for xref, _, _, basefont, *_ in doc.get_page_fonts(n):
+            if basefont in (font_names or {}):
+                doc.xref_set_key(xref, "BaseFont", f"/{font_names[basefont]}")
+    if metadata:
+        doc.set_metadata(metadata)
+    return doc.tobytes()
+
+
+def empty_pdf() -> bytes:
+    """A well-formed PDF whose page tree is empty (PyMuPDF refuses to write one)."""
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [] /Count 0 >>"]
+    data, offsets = b"%PDF-1.4\n", []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(data))
+        data += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(data)
+    data += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    data += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+    return data + f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
 
 
 def blank_pdf() -> bytes:

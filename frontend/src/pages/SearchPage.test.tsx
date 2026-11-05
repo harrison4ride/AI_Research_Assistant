@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { deferred, errorResponse, jsonResponse, mockFetch } from '../test/fetchMock'
 import { bert, paper, searchResponse, searchResult } from '../test/fixtures'
+import { itFailsUntilFixed } from '../test/knownBugs'
 import type { SavedKey } from '../types'
 import SearchPage from './SearchPage'
 
@@ -132,9 +133,9 @@ describe('SearchPage', () => {
     expect(Object.fromEntries(retried.query)).toEqual({ q: 'rag', source: 'openalex', page: '1', per_page: '10' })
   })
 
-  // Suspected app bug: the button reads the search box when clicked, not the query that failed.
+  // Confirmed app bug: the button reads the search box when clicked, not the query that failed.
   // README: "If an arXiv search fails, “Search OpenAlex instead” runs the same query on OpenAlex."
-  it.fails('runs the query that failed on OpenAlex even after the search box was edited', async () => {
+  itFailsUntilFixed('runs the query that failed on OpenAlex even after the search box was edited', async () => {
     const { api, user } = setup()
     api.on('GET', '/api/search', (call) =>
       call.query.get('source') === 'arxiv'
@@ -143,27 +144,28 @@ describe('SearchPage', () => {
     )
     await user.selectOptions(screen.getByRole('combobox', { name: 'Search source' }), 'arxiv')
     await search(user, 'rag')
-    await screen.findByText('arXiv did not answer in time.')
+    expect(await screen.findByText('arXiv did not answer in time.')).toBeInTheDocument()
     await user.type(screen.getByRole('searchbox'), ' evaluation') // not searched yet
 
     await user.click(screen.getByRole('button', { name: 'Search OpenAlex instead' }))
 
     await waitFor(() => expect(api.callsTo('GET', '/api/search')).toHaveLength(2))
-    expect(api.callsTo('GET', '/api/search')[1].query.get('q')).toBe('rag')
+    expect(await screen.findByText('Attention Is All You Need')).toBeInTheDocument()
+    return () => expect(api.callsTo('GET', '/api/search')[1].query.get('q')).toBe('rag')
   })
 
-  // Suspected app bug: the button appears whenever an error is shown while arXiv is selected in
+  // Confirmed app bug: the button appears whenever an error is shown while arXiv is selected in
   // the menu, so a failed OpenAlex search offers to "Search OpenAlex instead" once the menu is
   // switched to arXiv. README offers it only after an arXiv search fails.
-  it.fails('offers OpenAlex only after an arXiv search failed', async () => {
+  itFailsUntilFixed('offers OpenAlex only after an arXiv search failed', async () => {
     const { api, user } = setup()
     api.on('GET', '/api/search', errorResponse(504, 'OpenAlex timed out, please try again.'))
     await search(user, 'rag') // on OpenAlex, the default
-    await screen.findByText('OpenAlex timed out, please try again.')
+    expect(await screen.findByText('OpenAlex timed out, please try again.')).toBeInTheDocument()
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Search source' }), 'arxiv')
 
-    expect(screen.queryByRole('button', { name: 'Search OpenAlex instead' })).not.toBeInTheDocument()
+    return () => expect(screen.queryByRole('button', { name: 'Search OpenAlex instead' })).not.toBeInTheDocument()
   })
 
   it('replaces the results with those of a new search', async () => {

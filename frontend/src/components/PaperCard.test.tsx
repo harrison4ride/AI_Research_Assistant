@@ -2,7 +2,14 @@ import { createEvent, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { searchResult } from '../test/fixtures'
+import { useAppStylesheet } from '../test/stylesheet'
 import PaperCard from './PaperCard'
+
+// Whether the stylesheet cuts the text off after its first lines and hides the rest.
+function isClamped(element: HTMLElement): boolean {
+  const style = getComputedStyle(element)
+  return Number(style.getPropertyValue('-webkit-line-clamp')) > 0 && style.overflow === 'hidden'
+}
 
 describe('PaperCard', () => {
   it('shortens long author lists and expands them on request', async () => {
@@ -32,21 +39,25 @@ describe('PaperCard', () => {
   })
 
   it('toggles the full abstract', async () => {
+    useAppStylesheet()
     render(<PaperCard paper={searchResult()} />)
-    expect(screen.getByText(searchResult().abstract!)).toBeInTheDocument()
+    const abstract = screen.getByText(searchResult().abstract!)
+    expect(isClamped(abstract)).toBe(true)
 
     await userEvent.click(screen.getByRole('button', { name: 'Show full abstract' }))
-    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument()
+    expect(isClamped(abstract)).toBe(false)
     expect(screen.queryByRole('button', { name: 'Show full abstract' })).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Show less' }))
+    expect(isClamped(abstract)).toBe(true)
     expect(screen.getByRole('button', { name: 'Show full abstract' })).toBeInTheDocument()
   })
 
   it('shows the whole abstract without a toggle in the reader', () => {
+    useAppStylesheet()
     render(<PaperCard paper={searchResult()} defaultExpanded />)
 
-    expect(screen.getByText(searchResult().abstract!)).toBeInTheDocument()
+    expect(isClamped(screen.getByText(searchResult().abstract!))).toBe(false)
     expect(screen.queryByRole('button', { name: /Show/ })).not.toBeInTheDocument()
   })
 
@@ -78,11 +89,13 @@ describe('PaperCard', () => {
     expect(click.defaultPrevented).toBe(true) // the browser does not follow the link
   })
 
-  it('links the PDF: the open-access copy of a search result, or the stored copy', () => {
+  it('links the open-access PDF when the paper has one, even with a stored copy, and else the stored copy', () => {
     const { rerender } = render(<PaperCard paper={searchResult()} />)
     expect(screen.getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', 'https://arxiv.org/pdf/1706.03762')
 
-    // (Which link wins when there are both: see LibraryPage.test.tsx.)
+    rerender(<PaperCard paper={searchResult()} localPdfHref="/api/papers/1/pdf" />)
+    expect(screen.getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', 'https://arxiv.org/pdf/1706.03762')
+
     rerender(<PaperCard paper={searchResult({ pdf_url: null })} localPdfHref="/api/papers/1/pdf" />)
     expect(screen.getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', '/api/papers/1/pdf')
   })

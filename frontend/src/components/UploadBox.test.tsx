@@ -3,7 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { deferred, errorResponse, jsonResponse, mockFetch } from '../test/fetchMock'
 import { paper, pdfFile } from '../test/fixtures'
+import { useAppStylesheet } from '../test/stylesheet'
 import UploadBox from './UploadBox'
+
+// What the user sees of the drop zone's frame: its background and border colors.
+function looks(element: HTMLElement) {
+  const style = getComputedStyle(element)
+  return { background: style.backgroundColor, border: style.borderTopColor }
+}
 
 function setup() {
   const onUploaded = vi.fn()
@@ -94,6 +101,25 @@ describe('UploadBox', () => {
     await waitFor(() => expect(onUploaded).toHaveBeenCalledWith(uploaded))
     const form = api.callsTo('POST', '/api/papers/upload')[0].body as FormData
     expect((form.get('file') as File).name).toBe('dropped.pdf')
+  })
+
+  it('highlights the drop zone while a file is dragged over it, and not after the drop', async () => {
+    useAppStylesheet()
+    const { api, onUploaded } = setup()
+    api.on('POST', '/api/papers/upload', jsonResponse(paper({ id: 4, source: 'upload' }), 201))
+    const zone = screen.getByText(/or drop a paper here/).closest('div')!
+    const resting = looks(zone)
+
+    fireEvent.dragOver(zone)
+    expect(looks(zone)).not.toEqual(resting)
+    fireEvent.dragLeave(zone) // dragged away again
+    expect(looks(zone)).toEqual(resting)
+
+    fireEvent.dragOver(zone)
+    expect(looks(zone)).not.toEqual(resting)
+    fireEvent.drop(zone, { dataTransfer: { files: [pdfFile('dropped.pdf')] } })
+    expect(looks(zone)).toEqual(resting)
+    await waitFor(() => expect(onUploaded).toHaveBeenCalled())
   })
 
   it('refuses a dropped file that is not a PDF', async () => {

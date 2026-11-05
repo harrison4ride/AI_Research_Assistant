@@ -17,6 +17,7 @@ from app.services.llm import SUMMARY_REQUEST, LlmError
 from support import pdfs
 from support.fake_anthropic import FakeAnthropic, answer
 from support.fake_llm import RESET
+from support.known_bugs import fails_until_fixed, known_bug
 from support.papers import ARXIV_META, BERT_META, events, meta, save, streamed_text, upload, upload_sample
 from support.upstream import PUBLIC_IP
 
@@ -36,6 +37,9 @@ def test_summary_is_streamed_and_saved(client, fake_llm):
     response = summarize(client, paper["id"])
 
     assert response.status_code == 200
+    # Streamed as it is written: neither cached nor held back by a proxy such as nginx.
+    assert response.headers["cache-control"].lower() == "no-cache"
+    assert response.headers["x-accel-buffering"].lower() == "no"
     stream = events(response)
     assert stream[0] == {"type": "meta", "context": "full_text", "truncated": False}
     assert [e["type"] for e in stream[1:]] == ["text", "text", "done"]
@@ -60,6 +64,7 @@ def test_summary_is_based_on_the_full_text_of_the_paper(client, fake_llm):
     assert call.messages == [{"role": "user", "content": SUMMARY_REQUEST}]
     assert f"<title>{pdfs.SAMPLE_TITLE}</title>" in call.paper
     assert "<authors>Alice Smith, Bob Jones, Carol White</authors>" in call.paper
+    assert f"<year>{pdfs.SAMPLE_YEAR}</year>" in call.paper
     assert pdfs.BODY_MARKER in call.paper  # text from page 2, not just the metadata
     assert re.search(r"\b2 pages\b", source_note(call.paper))  # the model knows how long the paper is
     assert call.model == "opus"  # the configured default
@@ -191,26 +196,30 @@ def test_very_long_paper_is_cut_off_and_the_client_is_told(client, fake_llm, set
     assert pdfs.BODY_MARKER not in paper_block
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Suspected app bug: pdf.extract reads only the first MAX_PDF_PAGES_FOR_TEXT pages, but "
+@known_bug(
+    "Confirmed app bug: pdf.extract reads only the first MAX_PDF_PAGES_FOR_TEXT pages, but "
     "build_context is given page_count of the whole PDF and truncated=False, so neither the model "
     "nor the UI is told that the text was cut off (README: the prompt tells the model when a long "
-    "paper is cut off, and the Summary tab shows a note)."))
+    "paper is cut off, and the Summary tab shows a note).")
 def test_a_pdf_longer_than_the_page_limit_is_reported_as_cut_off(client, fake_llm):
-    paper = upload(client, pdfs.numbered_pages_pdf(pdf.MAX_PDF_PAGES_FOR_TEXT + 2)).json()
+    uploaded = upload(client, pdfs.numbered_pages_pdf(pdf.MAX_PDF_PAGES_FOR_TEXT + 2))
+    assert uploaded.status_code == 201, uploaded.text
 
-    stream = events(summarize(client, paper["id"]))
+    stream = events(summarize(client, uploaded.json()["id"]))
 
-    note = source_note(fake_llm.calls[0].paper)
-    assert stream[0] == {"type": "meta", "context": "full_text", "truncated": True}  # the UI is told
-    assert "cut off" in note  # and so is the model
+    [call] = fake_llm.calls
+    assert stream[-1]["type"] == "done"
+    with fails_until_fixed():
+        assert stream[0] == {"type": "meta", "context": "full_text", "truncated": True}  # the UI is told
+        assert "cut off" in source_note(call.paper)  # and so is the model
 
 
-@pytest.mark.parametrize(("pdf_url", "downloads"), [
-    ("https://papers.example.org/missing.pdf", 1),  # the link answers 404
-    ("http://10.0.0.7/bert.pdf", 0),  # a private address: refused without a request
+@pytest.mark.parametrize(("pdf_url", "host", "downloads"), [
+    ("https://papers.example.org/missing.pdf", "papers.example.org", 1),  # the link answers 404
+    ("http://10.0.0.7/bert.pdf", "10.0.0.7", 0),  # a private address: refused without a request
 ])
-def test_after_a_failed_download_the_abstract_is_used_and_labelled(client, fake_llm, upstream, dns, pdf_url, downloads):
+def test_after_a_failed_download_the_abstract_is_used_and_labelled(
+        client, fake_llm, upstream, dns, pdf_url, host, downloads):
     dns["papers.example.org"] = PUBLIC_IP
     upstream.get("https://papers.example.org/missing.pdf", lambda request: httpx.Response(404))
     paper = save(client, meta(BERT_META, pdf_url=pdf_url))
@@ -223,7 +232,10 @@ def test_after_a_failed_download_the_abstract_is_used_and_labelled(client, fake_
     assert summary[-1]["paper"]["summary_context"] == "abstract"
     assert answer_[-1]["messages"][1]["context"] == "abstract"
     assert all(BERT_META["abstract"] in call.paper for call in fake_llm.calls)
-    assert len(upstream.requests) == downloads  # tried once, not again for every request
+    # Tried once, not again for every request: every attempt starts with an address check,
+    # also one that is refused before any request is sent.
+    assert dns.lookups == [host]
+    assert len(upstream.requests) == downloads
 
 
 @pytest.mark.parametrize("endpoint", ["summary", "chat"])

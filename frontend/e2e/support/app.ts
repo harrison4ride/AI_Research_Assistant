@@ -80,6 +80,13 @@ export function sectionItem(page: Page, title: string): Locator {
   return page.getByRole('listitem').filter({ has: page.getByRole('button', { name: new RegExp(`^${title}`) }) })
 }
 
+// How tall `text` from the PDF is drawn, in pixels: it grows and shrinks with the zoom.
+export async function textHeightInPdfView(page: Page, text: string): Promise<number> {
+  const box = await page.locator('.pdf-scroll').getByText(text, { exact: true }).boundingBox()
+  if (!box) throw new Error(`"${text}" is not laid out in the PDF view`)
+  return box.height
+}
+
 // Where `text` from the PDF is drawn, in pixels below the top of the PDF view.
 export async function offsetInPdfView(page: Page, text: string): Promise<number> {
   const view = page.locator('.pdf-scroll')

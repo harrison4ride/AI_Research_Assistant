@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { deferred, errorResponse, jsonResponse, mockFetch } from '../test/fetchMock'
 import { paper, pdfFile } from '../test/fixtures'
+import { itFailsUntilFixed } from '../test/knownBugs'
 import type { Paper } from '../types'
 import FullTextStatus from './FullTextStatus'
 
@@ -98,20 +99,22 @@ describe('FullTextStatus', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  // Suspected app bug: after any error, FullTextStatus shows only the error and a "Retry" link
+  // Confirmed app bug: after any error, FullTextStatus shows only the error and a "Retry" link
   // that retries the download; the Attach PDF button and its file input are gone. A user who
   // picked the wrong file must click "Retry" (a download retry) before attaching again.
-  it.fails('lets the user attach another file after a refused one', async () => {
+  itFailsUntilFixed('lets the user attach another file after a refused one', async () => {
     const { api, user, onChange } = setup(paper({ id: 2, full_text_status: 'unavailable' }))
     api.on('POST', '/api/papers/2/pdf', errorResponse(415, 'The file is not a PDF.'))
     await user.upload(filePicker(), pdfFile('notes.pdf'))
-    await screen.findByText('The file is not a PDF.')
+    expect(await screen.findByText('The file is not a PDF.')).toBeInTheDocument()
     api.on('POST', '/api/papers/2/pdf', withPdf)
 
-    await user.click(screen.getByRole('button', { name: 'Attach PDF' }))
-    await user.upload(filePicker(), pdfFile('bert.pdf'))
-
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ full_text_status: 'ok' })))
+    return async () => {
+      expect(screen.queryByRole('button', { name: 'Attach PDF' })).not.toBeNull()
+      await user.click(screen.getByRole('button', { name: 'Attach PDF' }))
+      await user.upload(filePicker(), pdfFile('bert.pdf'))
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ full_text_status: 'ok' })))
+    }
   })
 
   it('offers a retry when the first download request fails', async () => {

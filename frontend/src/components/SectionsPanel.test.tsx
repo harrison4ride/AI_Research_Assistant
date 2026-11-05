@@ -3,8 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { deferred, errorResponse, jsonResponse, mockFetch } from '../test/fetchMock'
 import { config, outline, paper } from '../test/fixtures'
+import { useAppStylesheet } from '../test/stylesheet'
 import type { AppConfig, Outline } from '../types'
 import SectionsPanel from './SectionsPanel'
+
+// How far the stylesheet moves an item in from the list's left edge (jsdom keeps the unit, rem).
+function indent(item: HTMLElement): number {
+  return parseFloat(getComputedStyle(item).marginLeft) || 0
+}
 
 const reader = paper({ id: 3, has_pdf: true, full_text_status: 'ok' })
 
@@ -46,6 +52,17 @@ describe('SectionsPanel', () => {
       '2.1 Retrieverp. 2',
     ])
     expect(screen.getByRole('button', { name: /2 Method/ })).toHaveAttribute('title', 'Go to page 2')
+  })
+
+  it('indents subsections under their section', async () => {
+    useAppStylesheet()
+    setup()
+
+    // 1 Introduction, 2 Method, and its subsection 2.1 Retriever, in this order.
+    const [introduction, method, retriever] = (await screen.findAllByRole('listitem')).map(indent)
+
+    expect(method).toBe(introduction) // sections line up
+    expect(retriever).toBeGreaterThan(method) // the subsection sits further right
   })
 
   it('jumps to a section in the PDF', async () => {

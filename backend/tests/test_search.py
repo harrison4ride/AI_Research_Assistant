@@ -91,15 +91,27 @@ def test_openalex_email_and_api_key_are_sent_when_configured(client, upstream, s
 def test_openalex_result_with_missing_fields(client, upstream):
     work = openalex_work(title=None, authors=(), year=None, abstract=None, doi=None,
                          landing_page=None, pdf_url=None, venue=None)
-    upstream.json(OPENALEX_WORKS, openalex_page([work]))
+    without_id = {**openalex_work(work_id="W1"), "id": None}
+    upstream.json(OPENALEX_WORKS, openalex_page([work, without_id]))
 
-    [result] = client.get("/api/search", params={"q": "x"}).json()["results"]
+    result, other = client.get("/api/search", params={"q": "x"}).json()["results"]
 
     assert result["title"] == "(untitled)"
     assert result["authors"] == []
     assert result["year"] is None and result["abstract"] is None and result["doi"] is None
     assert result["pdf_url"] is None and result["venue"] is None
     assert result["url"] == "https://openalex.org/W2741809807"  # falls back to the OpenAlex page
+    assert (other["external_id"], other["url"]) == (None, "https://arxiv.org/abs/1706.03762")
+
+
+def test_openalex_pdf_link_of_the_primary_location_is_used_when_there_is_no_open_access_one(client, upstream):
+    work = openalex_work(pdf_url=None)
+    work["primary_location"]["pdf_url"] = "https://publisher.example/paper.pdf"
+    upstream.json(OPENALEX_WORKS, openalex_page([work]))
+
+    [result] = client.get("/api/search", params={"q": "x"}).json()["results"]
+
+    assert result["pdf_url"] == "https://publisher.example/paper.pdf"
 
 
 def test_openalex_markup_is_removed_but_comparisons_are_kept(client, upstream):
@@ -190,6 +202,50 @@ def test_arxiv_query_keeps_exact_phrase_and_drops_stopwords(client, upstream):
         "((ti:attention OR abs:attention) AND (ti:need OR abs:need))"
     )
     assert (params["start"], params["max_results"]) == ("10", "5")
+    assert params["sortBy"] == "relevance"  # best matches first
+
+
+def test_arxiv_entries_with_missing_fields(client, upstream):
+    upstream.text(ARXIV_QUERY, arxiv_feed([
+        "<entry><title>A Paper Without Details</title></entry>",  # no id, date, abstract, authors, or links
+        "<entry><id>https://example.org/papers/42</id></entry>",  # no title, and an id that is not arXiv's
+    ]))
+
+    first, second = client.get("/api/search", params={"q": "x", "source": "arxiv"}).json()["results"]
+
+    assert first == {"source": "arxiv", "external_id": None, "title": "A Paper Without Details", "authors": [],
+                     "year": None, "abstract": None, "url": None, "pdf_url": None, "venue": "arXiv", "doi": None}
+    assert (second["title"], second["external_id"], second["url"]) == (
+        "(untitled)", None, "https://example.org/papers/42")
+
+
+@pytest.mark.parametrize(("links", "pdf_url"), [
+    ('<link title="pdf" href="https://arxiv.org/pdf/2101.00001v1"/>', "https://arxiv.org/pdf/2101.00001v1"),
+    ('<link href="https://arxiv.org/pdf/2101.00001v1" type="application/pdf"/>', "https://arxiv.org/pdf/2101.00001v1"),
+    ('<link title="pdf" href="https://arxiv.org/pdf/2101.00001v1" rel="related" type="application/pdf"/>'
+     '<link href="https://arxiv.org/abs/2101.00001v1" rel="alternate" type="text/html"/>',
+     "https://arxiv.org/pdf/2101.00001v1"),
+    ('<link href="https://arxiv.org/abs/2101.00001v1" rel="alternate" type="text/html"/>', None),
+], ids=["marked by its title", "marked by its type", "before the abstract page", "no PDF link"])
+def test_arxiv_pdf_link_is_recognized_by_its_title_or_its_type(client, upstream, links, pdf_url):
+    entry = f"<entry><id>http://arxiv.org/abs/2101.00001v1</id><title>A Paper</title>{links}</entry>"
+    upstream.text(ARXIV_QUERY, arxiv_feed([entry]))
+
+    [result] = client.get("/api/search", params={"q": "x", "source": "arxiv"}).json()["results"]
+
+    assert result["pdf_url"] == pdf_url
+
+
+@pytest.mark.parametrize("total", [None, "about 40"], ids=["missing", "not a number"])
+def test_arxiv_feed_without_a_usable_total_still_shows_its_results(client, upstream, total):
+    feed = arxiv_feed([arxiv_entry()]).replace(
+        "<opensearch:totalResults>1</opensearch:totalResults>",
+        f"<opensearch:totalResults>{total}</opensearch:totalResults>" if total else "")
+    upstream.text(ARXIV_QUERY, feed)
+
+    body = client.get("/api/search", params={"q": "x", "source": "arxiv"}).json()
+
+    assert body["total"] is None and [r["external_id"] for r in body["results"]] == ["1706.03762"]
 
 
 def test_arxiv_entry_without_journal_reference_is_labelled_arxiv(client, upstream):
@@ -216,6 +272,16 @@ def test_arxiv_rejected_query_is_reported(client, upstream):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "arXiv rejected the query: incorrect id format for 1234"
+
+
+def test_arxiv_rejection_without_a_reason_is_reported(client, upstream):
+    error = "<entry><id>http://arxiv.org/api/errors#unknown</id><title>Error</title></entry>"
+    upstream.text(ARXIV_QUERY, arxiv_feed([error], total=1))
+
+    response = client.get("/api/search", params={"q": "x", "source": "arxiv"})
+
+    assert (response.status_code, response.json()["detail"]) == (
+        400, "arXiv rejected the query: arXiv rejected the query.")
 
 
 @pytest.mark.parametrize(("reply", "status", "detail"), [
@@ -269,19 +335,23 @@ def test_arxiv_pause_lasts_one_to_ten_minutes_and_then_arxiv_is_asked_again(
     assert len(upstream.requests) == 2
 
 
-def test_arxiv_calls_are_spaced_3_seconds_apart(client, upstream, clock):
-    # README: "The app keeps 3 seconds between its arXiv calls."
-    upstream.text(ARXIV_QUERY, arxiv_feed([]))
+@pytest.mark.parametrize(("later", "sent_after"), [(1.0, 3.0), (2.5, 3.0), (5.0, 5.0)])
+def test_arxiv_calls_are_spaced_3_seconds_apart(client, upstream, clock, later, sent_after):
+    # README: "The app keeps 3 seconds between its arXiv calls." A search made sooner waits for
+    # the rest of the 3 s; one made later does not wait at all.
+    sent_at = []
+
+    def feed(request):
+        sent_at.append(clock.now)
+        return httpx.Response(200, content=arxiv_feed([]))
+
+    upstream.get(ARXIV_QUERY, feed)
 
     client.get("/api/search", params={"q": "first", "source": "arxiv"})
-    clock.advance(1.0)
+    clock.advance(later)
     client.get("/api/search", params={"q": "second", "source": "arxiv"})
-    clock.advance(5.0)
-    client.get("/api/search", params={"q": "third", "source": "arxiv"})
 
-    assert len(upstream.requests) == 3
-    # The second call waited the rest of the 3 s; the third, made later, did not wait.
-    assert clock.sleeps == [pytest.approx(2.0)]
+    assert sent_at[1] - sent_at[0] == pytest.approx(sent_after)
 
 
 def test_arxiv_connection_error_is_reported_without_a_pause(client, upstream):
@@ -296,6 +366,20 @@ def test_arxiv_connection_error_is_reported_without_a_pause(client, upstream):
     assert len(upstream.requests) == 2
 
 
+def test_the_pause_message_counts_down_to_the_last_second(client, upstream, clock):
+    upstream.get(ARXIV_QUERY, lambda r: httpx.Response(429))
+    client.get("/api/search", params={"q": "first", "source": "arxiv"})  # starts a 60 s pause
+
+    clock.advance(30)
+    halfway = client.get("/api/search", params={"q": "second", "source": "arxiv"})
+    clock.advance(29.6)
+    last_second = client.get("/api/search", params={"q": "third", "source": "arxiv"})
+
+    assert "paused for about 30 s" in halfway.json()["detail"]
+    assert "paused for about 1 s" in last_second.json()["detail"]
+    assert len(upstream.requests) == 1
+
+
 def test_arxiv_timeout_also_starts_a_cooldown(client, upstream):
     upstream.fail(ARXIV_QUERY, httpx.ReadTimeout)
 
@@ -303,7 +387,8 @@ def test_arxiv_timeout_also_starts_a_cooldown(client, upstream):
     second = client.get("/api/search", params={"q": "y", "source": "arxiv"})
 
     assert first.status_code == 504
-    assert "did not answer in time" in first.json()["detail"]
+    assert first.json()["detail"] == (
+        "arXiv did not answer in time (it may be limiting requests). Try again in a minute, or search OpenAlex.")
     assert second.status_code == 429
     assert len(upstream.requests) == 1
 

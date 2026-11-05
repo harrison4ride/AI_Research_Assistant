@@ -1,6 +1,7 @@
 """The reader's section outline (from the PDF) and its one-sentence section summaries."""
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pymupdf
@@ -8,6 +9,7 @@ import pytest
 
 from app.db import SessionLocal
 from app.models import Paper
+from app.services import pdf
 from app.services.fulltext import store_pdf
 from app.services.llm import LlmError
 from support import pdfs
@@ -99,6 +101,38 @@ def test_outline_of_unknown_paper(client):
     assert client.get("/api/papers/999999/outline").status_code == 404
 
 
+def test_outline_of_a_stored_pdf_that_can_no_longer_be_read(client, fake_llm, settings):
+    paper = upload_sample(client)
+    [stored] = settings.pdf_dir.iterdir()
+    stored.write_bytes(b"%PDF-1.7 damaged on disk")
+
+    body = outline(client, paper["id"])
+
+    assert (body["available"], body["reason"], body["sections"]) == (False, "The file could not be read as a PDF.", [])
+
+
+def test_an_outline_read_from_a_pdf_that_was_replaced_meanwhile_is_not_kept(client, fake_llm, monkeypatch):
+    paper = upload_sample(client)
+    replacement = pdfs.paper_pdf(toc=[[1, "Introduction", 1], [1, "Method", 2], [1, "Experiments", 2]])
+    read_outline = pdf.extract_outline
+
+    def read_while_another_pdf_is_attached(data):
+        sections = read_outline(data)
+        with SessionLocal() as session:  # as POST /pdf would while the outline is being read
+            session.get(Paper, paper["id"]).pdf_path = store_pdf(replacement)
+            session.commit()
+        return sections
+
+    monkeypatch.setattr(pdf, "extract_outline", read_while_another_pdf_is_attached)
+    response = client.get(f"/api/papers/{paper['id']}/outline")
+    monkeypatch.setattr(pdf, "extract_outline", read_outline)
+
+    assert (response.status_code, response.json()["detail"]) == (
+        409, "The paper's PDF changed while it was being read. Try again.")
+    # Nothing was stored for the old file: the next request reads the new one.
+    assert [s["title"] for s in outline(client, paper["id"])["sections"]] == ["Introduction", "Method", "Experiments"]
+
+
 def test_section_summaries_are_written_and_saved(client, fake_llm):
     paper = upload_sample(client)
     fake_llm.reply_with(summaries_for_every_heading)
@@ -108,6 +142,7 @@ def test_section_summaries_are_written_and_saved(client, fake_llm):
     assert response.status_code == 200
     body = response.json()
     assert body["summarized"] is True and body["model"] == "fake-model-1"
+    assert abs(datetime.now(timezone.utc) - datetime.fromisoformat(body["summarized_at"])) < timedelta(minutes=1)
     assert [s["summary"] for s in body["sections"]] == [f"About {title}." for title in SECTIONS]
     assert outline(client, paper["id"]) == body  # saved
 
@@ -200,7 +235,7 @@ def test_attaching_a_new_pdf_resets_the_outline(client, fake_llm):
                 files={"file": ("v2.pdf", pdfs.paper_pdf(toc=toc), "application/pdf")})
 
     body = outline(client, paper["id"])
-    assert body["summarized"] is False
+    assert (body["summarized"], body["model"], body["summarized_at"]) == (False, None, None)
     assert [s["title"] for s in body["sections"]] == ["Introduction", "Method", "Experiments"]
 
 

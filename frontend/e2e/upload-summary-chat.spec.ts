@@ -8,6 +8,7 @@ import {
   resetApp,
   samplePaper,
   sectionItem,
+  textHeightInPdfView,
 } from './support/app'
 
 test.beforeEach(async ({ request }) => {
@@ -138,15 +139,18 @@ test('zooming keeps the reading position', async ({ page }) => {
   await page.getByRole('button', { name: /^4 Results/ }).click()
   await expect.poll(() => offsetInPdfView(page, '4 Results')).toBeLessThan(60)
   const before = await offsetInPdfView(page, '4 Results')
+  const heightAtFitWidth = await textHeightInPdfView(page, '4 Results')
 
-  for (const control of ['Zoom in', 'Zoom in', 'Zoom out', 'Fit width']) {
+  for (const [control, zoom] of [['Zoom in', 125], ['Zoom in', 150], ['Zoom out', 125], ['Fit width', 100]] as const) {
     await page.getByRole('button', { name: control }).click()
+    // Wait for the new zoom level: its label, and the page drawn at the new size (PDF.js
+    // redraws a page's text a moment after the page itself is resized).
+    await expect(page.locator('.pdf-toolbar').getByText(`${zoom}%`, { exact: true })).toBeVisible()
+    await expect.poll(async () => (await textHeightInPdfView(page, '4 Results')) / heightAtFitWidth).toBeCloseTo(zoom / 100, 1)
     // The same place stays at the top of the view, whatever the page size.
-    await expect.poll(() => offsetInPdfView(page, '4 Results')).toBeGreaterThan(before - 25)
-    expect(await offsetInPdfView(page, '4 Results')).toBeLessThan(before + 25)
+    await expect.poll(async () => Math.abs((await offsetInPdfView(page, '4 Results')) - before)).toBeLessThan(25)
     await expect(page.getByText('Page 4 of 5')).toBeVisible()
   }
-  await expect(page.getByText('100%')).toBeVisible()
 })
 
 test('fix the extracted metadata', async ({ page }) => {

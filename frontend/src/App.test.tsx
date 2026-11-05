@@ -6,6 +6,7 @@ import App from './App'
 import { allowConsoleErrors } from './test/console'
 import { deferred, errorResponse, jsonResponse, mockFetch } from './test/fetchMock'
 import { config, outline, paper } from './test/fixtures'
+import { itFailsUntilFixed } from './test/knownBugs'
 
 vi.mock('./components/PdfViewer', () => ({ default: () => null }))
 
@@ -86,11 +87,12 @@ describe('App', () => {
     await waitFor(() => expect(markedTabs()).toEqual([tab]))
   })
 
-  // Suspected app bug: App passes PaperPage a new onLibraryState function on every render,
+  // Confirmed app bug: App passes PaperPage a new onLibraryState function on every render,
   // PaperPage calls it from an effect that depends on it, and App then stores a new object,
   // so App and PaperPage re-render each other forever while a paper is open (React logs
   // "Maximum update depth exceeded"). The page must settle once the paper has loaded.
-  it.fails('settles after opening a paper, without React errors', async () => {
+  itFailsUntilFixed('settles after opening a paper, without React errors', async () => {
+    const renderLoopErrors = allowConsoleErrors(RENDER_LOOP) // the bug's symptom: checked below
     let commits = 0
     withPaper(backend())
     window.location.hash = '#/paper/4'
@@ -105,10 +107,13 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /1 Introduction/ })).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'What datasets are used?' })).toBeEnabled()
 
-    // Nothing is left to change, so nothing renders any more.
-    const before = commits
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    expect(commits - before).toBe(0)
+    return async () => {
+      // Nothing is left to change, so nothing renders any more, and React reports no loop.
+      const before = commits
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(commits - before).toBe(0)
+      expect(renderLoopErrors).toEqual([])
+    }
   })
 
   it('goes back to the page the paper was opened from', async () => {

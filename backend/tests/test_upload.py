@@ -14,6 +14,7 @@ from app.models import Paper
 from app.services import fulltext
 from app.services.llm import ExtractedMetadata
 from support import pdfs
+from support.known_bugs import fails_until_fixed, known_bug
 from support.papers import BERT_META, save, upload, upload_sample
 from support.upstream import ARXIV_QUERY, arxiv_entry, arxiv_feed
 
@@ -50,7 +51,8 @@ def test_upload_extracts_metadata_from_the_pdf_layout(client, fake_llm):
 
 
 def test_upload_asks_the_llm_with_the_text_of_the_first_pages_only(client, fake_llm):
-    # README: "the first pages go to Anthropic for metadata extraction".
+    # README: "the first pages go to Anthropic for metadata extraction". The app sends at most
+    # the first 15,000 characters of the text.
     last_line = "This closing sentence is on the last page only."
     data = pdfs.long_paper_pdf(extra_pages=10, last_line=last_line)  # about 40,000 characters
 
@@ -59,9 +61,11 @@ def test_upload_asks_the_llm_with_the_text_of_the_first_pages_only(client, fake_
     [first_pages] = fake_llm.metadata_requests
     with SessionLocal() as session:
         full_text = session.get(Paper, paper["id"]).full_text
-    assert last_line in full_text and paper["page_count"] == 11
+    assert last_line in full_text and paper["page_count"] == 11 and len(full_text) > 30_000
     assert full_text.startswith(first_pages)  # the beginning of the paper, unchanged
+    assert len(first_pages) <= 15_000
     assert pdfs.SAMPLE_ABSTRACT[:60] in first_pages
+    assert pdfs.LONG_FILLER[:60] in first_pages  # pages, not only page 1
     assert last_line not in first_pages
 
 
@@ -148,24 +152,34 @@ def test_placeholder_title_in_pdf_properties_is_ignored(client, fake_llm, placeh
     assert upload(client, data).json()["title"] == pdfs.SAMPLE_TITLE
 
 
-PLACEHOLDER_PREFIX_BUG = pytest.mark.xfail(strict=True, reason=(
-    "Suspected app bug: JUNK_META_TITLE in app/services/pdf.py has no end anchor after the "
+def test_a_real_title_in_pdf_properties_is_kept(client, fake_llm):
+    data = pdfs.paper_pdf(metadata={"title": "Untangling Placeholder Titles in PDF Files"})
+
+    assert upload(client, data).json()["title"] == "Untangling Placeholder Titles in PDF Files"
+
+
+REAL_TITLES_STARTING_WITH_PLACEHOLDER_WORDS = [
+    "Paper Recommendation with Graph Neural Networks",
+    "Main Memory Databases Revisited for Modern Hardware",
+    "Document Layout Analysis at Web Scale",
+    "arXiv Usage Statistics over Two Decades",
+]
+
+
+@known_bug(
+    "Confirmed app bug: JUNK_META_TITLE in app/services/pdf.py has no end anchor after the "
     "placeholder words, so any real title that merely starts with Main, Paper, Document, or "
-    "arXiv is discarded as a placeholder."))
-
-
-@pytest.mark.parametrize("real_title", [
-    pytest.param("Paper Recommendation with Graph Neural Networks", marks=PLACEHOLDER_PREFIX_BUG),
-    pytest.param("Main Memory Databases Revisited for Modern Hardware", marks=PLACEHOLDER_PREFIX_BUG),
-    pytest.param("Document Layout Analysis at Web Scale", marks=PLACEHOLDER_PREFIX_BUG),
-    pytest.param("arXiv Usage Statistics over Two Decades", marks=PLACEHOLDER_PREFIX_BUG),
-    "Untangling Placeholder Titles in PDF Files",
-])
-def test_a_real_title_in_pdf_properties_is_kept_whatever_word_it_starts_with(client, fake_llm, real_title):
+    "arXiv is discarded as a placeholder.")
+def test_a_real_title_in_pdf_properties_is_kept_whatever_word_it_starts_with(client, fake_llm):
     # pdf.py filters only "placeholder titles that PDF producers write into the metadata".
-    data = pdfs.paper_pdf(metadata={"title": real_title})
+    kept = []
+    for real_title in REAL_TITLES_STARTING_WITH_PLACEHOLDER_WORDS:
+        response = upload(client, pdfs.paper_pdf(metadata={"title": real_title}))
+        assert response.status_code == 201, response.text
+        kept.append(response.json()["title"])
 
-    assert upload(client, data).json()["title"] == real_title
+    with fails_until_fixed():
+        assert kept == REAL_TITLES_STARTING_WITH_PLACEHOLDER_WORDS
 
 
 # --- arXiv PDFs -----------------------------------------------------------------------------------
@@ -265,6 +279,7 @@ def test_files_that_are_not_pdfs_are_rejected(client, fake_llm, settings, data, 
 @pytest.mark.parametrize(("data", "detail"), [
     (pdfs.corrupt_pdf(), "The file could not be read as a PDF."),
     (pdfs.encrypted_pdf(), "The PDF is password-protected."),
+    (pdfs.empty_pdf(), "The PDF has no pages."),
     (pdfs.blank_pdf(), "No text could be extracted. The PDF may be a scanned image."),
 ])
 def test_unreadable_pdfs_are_rejected_with_the_reason(client, fake_llm, settings, data, detail):
@@ -277,9 +292,11 @@ def test_unreadable_pdfs_are_rejected_with_the_reason(client, fake_llm, settings
     assert fake_llm.metadata_requests == []
 
 
-def test_file_over_the_size_limit_is_rejected(client, fake_llm, settings, monkeypatch):
+@pytest.mark.parametrize("over", [1, 1024 * 1024], ids=["one byte", "a megabyte"])
+def test_file_over_the_size_limit_is_rejected(client, fake_llm, settings, monkeypatch, over):
     monkeypatch.setattr(settings, "max_pdf_mb", 1)
-    data = pdfs.sample_pdf() + b"%" * (1024 * 1024)  # still a PDF, but over 1 MB
+    data = pdfs.sample_pdf()
+    data += b"%" * (1024 * 1024 + over - len(data))  # still a PDF, but over 1 MB
 
     response = upload(client, data)
 

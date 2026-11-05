@@ -3,7 +3,7 @@
 // through console.error; a test that passes while React complains is not a passing test.
 const original = console.error
 let unexpected: string[] = []
-let allowed: RegExp[] = []
+let allowed: { pattern: RegExp; seen: string[] }[] = []
 
 // console.error's own formatting: "%s" placeholders (as React uses), then the other arguments.
 function format(...args: unknown[]): string {
@@ -18,9 +18,12 @@ function format(...args: unknown[]): string {
   return [text, ...rest.slice(next).map(String)].join(' ')
 }
 
-// Let the current test log errors matching these patterns (e.g. an error the test causes on purpose).
-export function allowConsoleErrors(...patterns: RegExp[]) {
-  allowed.push(...patterns)
+// Let the current test log errors matching these patterns (e.g. an error the test causes on
+// purpose). Returns the matching errors as they are logged, for a test that checks them.
+export function allowConsoleErrors(...patterns: RegExp[]): string[] {
+  const seen: string[] = []
+  allowed.push(...patterns.map((pattern) => ({ pattern, seen })))
+  return seen
 }
 
 export function watchConsoleErrors() {
@@ -28,7 +31,9 @@ export function watchConsoleErrors() {
   allowed = []
   console.error = (...args: unknown[]) => {
     const text = format(...args)
-    if (!allowed.some((pattern) => pattern.test(text))) unexpected.push(text)
+    const match = allowed.find(({ pattern }) => pattern.test(text))
+    if (match) match.seen.push(text)
+    else unexpected.push(text)
   }
 }
 

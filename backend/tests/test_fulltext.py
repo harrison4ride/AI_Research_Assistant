@@ -14,6 +14,7 @@ from app.main import app
 from app.models import Paper
 from app.services import fulltext
 from support import pdfs
+from support.known_bugs import fails_until_fixed, known_bug
 from support.papers import BERT_META, events, meta, save
 from support.upstream import PUBLIC_IP
 
@@ -34,6 +35,21 @@ def fetch(client, paper_id: int, retry: bool = False):
 def pdf_reply(data: bytes | None = None):
     return lambda request: httpx.Response(200, content=data or pdfs.sample_pdf(),
                                           headers={"content-type": "application/pdf"})
+
+
+def pdf_in_pieces(data: bytes, piece: int = 64 * 1024):
+    """A PDF that arrives in many pieces, as it does over a real network."""
+    async def pieces():
+        for start in range(0, len(data), piece):
+            yield data[start:start + piece]
+
+    return lambda request: httpx.Response(200, content=pieces(), headers={"content-type": "application/pdf"})
+
+
+def with_size(megabytes: int, extra: int = 0) -> bytes:
+    """The sample PDF, padded to exactly `megabytes` MB plus `extra` bytes."""
+    data = pdfs.sample_pdf()
+    return data + b"%" * (megabytes * 1024 * 1024 + extra - len(data))
 
 
 def test_download_open_access_pdf(client, upstream, paper):
@@ -79,6 +95,7 @@ def test_paper_without_a_pdf_link(client, upstream):
     (lambda r: httpx.Response(403), "The PDF link returned HTTP 403."),
     (lambda r: httpx.Response(200, content=pdfs.blank_pdf()),
      "No text could be extracted. The PDF may be a scanned image."),
+    (lambda r: httpx.Response(302), "The PDF link returned HTTP 302."),  # a redirect that names no target
 ])
 def test_download_failures_are_recorded_with_the_reason(client, upstream, paper, reply, error):
     upstream.get(PDF_URL, reply)
@@ -101,15 +118,38 @@ def test_network_error_while_downloading(client, upstream, paper):
     assert body["full_text_error"] == "The PDF could not be downloaded."
 
 
-def test_pdf_over_the_size_limit_is_not_kept(client, upstream, paper, settings, monkeypatch):
+@pytest.mark.parametrize("reply", [pdf_reply, pdf_in_pieces], ids=["at once", "in pieces"])
+@pytest.mark.parametrize("extra", [1, 1024 * 1024], ids=["one byte over", "a megabyte over"])
+def test_pdf_over_the_size_limit_is_not_kept(client, upstream, paper, settings, monkeypatch, reply, extra):
     monkeypatch.setattr(settings, "max_pdf_mb", 1)
-    upstream.get(PDF_URL, pdf_reply(pdfs.sample_pdf() + b"%" * (2 * 1024 * 1024)))
+    upstream.get(PDF_URL, reply(with_size(1, extra)))
 
     body = fetch(client, paper["id"]).json()
 
     assert body["full_text_status"] == "error"
     assert body["full_text_error"] == "The PDF is larger than 1 MB."
     assert body["has_pdf"] is False
+
+
+@pytest.mark.parametrize("reply", [pdf_reply, pdf_in_pieces], ids=["at once", "in pieces"])
+def test_a_pdf_exactly_as_large_as_the_limit_is_kept_byte_for_byte(client, upstream, paper, settings, monkeypatch,
+                                                                   reply):
+    monkeypatch.setattr(settings, "max_pdf_mb", 1)
+    data = with_size(1)
+    upstream.get(PDF_URL, reply(data))
+
+    assert fetch(client, paper["id"]).json()["full_text_status"] == "ok"
+    assert client.get(f"/api/papers/{paper['id']}/pdf").content == data
+
+
+def test_a_pdf_download_cannot_hang_forever(client, upstream, paper):
+    # A host that stops answering must not keep the reader waiting without end.
+    upstream.get(PDF_URL, pdf_reply())
+
+    fetch(client, paper["id"])
+
+    [request] = upstream.requests
+    assert all(isinstance(limit, (int, float)) for limit in request.extensions["timeout"].values())
 
 
 @pytest.mark.parametrize("url", [
@@ -140,6 +180,37 @@ def test_redirect_to_a_private_address_is_not_followed(client, upstream, paper):
 
     assert body["full_text_error"] == PRIVATE_URL_MESSAGE
     assert len(upstream.requests) == 1  # only the first hop was requested
+
+
+def test_a_plain_http_link_to_a_public_host_is_downloaded(client, upstream, dns):
+    # arXiv's own PDF links are http:// links.
+    dns["arxiv.org"] = PUBLIC_IP
+    upstream.get("http://arxiv.org/pdf/1810.04805v2", pdf_reply())
+    paper = save(client, meta(BERT_META, pdf_url="http://arxiv.org/pdf/1810.04805v2"))
+
+    assert fetch(client, paper["id"]).json()["full_text_status"] == "ok"
+    [request] = upstream.requests
+    assert (request.url.scheme, request.url.host, request.headers["host"]) == ("http", PUBLIC_IP, "arxiv.org")
+
+
+def test_a_link_with_a_port_is_downloaded_from_that_port(client, upstream, dns):
+    dns["papers.example.org"] = PUBLIC_IP
+    upstream.get("https://papers.example.org:8443/bert.pdf", pdf_reply())
+    paper = save(client, meta(BERT_META, pdf_url="https://papers.example.org:8443/bert.pdf"))
+
+    assert fetch(client, paper["id"]).json()["full_text_status"] == "ok"
+    [request] = upstream.requests
+    assert (request.url.host, request.url.port) == (PUBLIC_IP, 8443)
+    assert request.headers["host"] == "papers.example.org:8443"  # the host and port the link names
+
+
+def test_a_relative_redirect_is_followed_on_the_same_host(client, upstream, paper):
+    upstream.get(PDF_URL, lambda r: httpx.Response(302, headers={"location": "/files/bert-v2.pdf"}))
+    upstream.get("https://papers.example.org/files/bert-v2.pdf", pdf_reply())
+
+    assert fetch(client, paper["id"]).json()["full_text_status"] == "ok"
+    assert [(r.headers["host"], r.url.path) for r in upstream.requests] == [
+        ("papers.example.org", "/bert.pdf"), ("papers.example.org", "/files/bert-v2.pdf")]
 
 
 def test_redirect_to_another_public_host_is_followed(client, upstream, dns, paper):
@@ -230,41 +301,64 @@ def test_a_host_with_any_private_address_is_not_downloaded(client, upstream, dns
     assert upstream.requests == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Suspected app bug: fulltext._check_public raises UnsafeUrl for any non-http(s) link, and "
+@known_bug(
+    "Confirmed app bug: fulltext._check_public raises UnsafeUrl for any non-http(s) link, and "
     "ensure_full_text reports every UnsafeUrl as 'points to a local or private address', which is "
-    "false for an ftp:// link to a public host."))
+    "false for an ftp:// link to a public host.")
 def test_a_link_that_is_not_http_is_refused_with_a_true_reason(client, upstream):
     paper = save(client, meta(BERT_META, pdf_url="ftp://ftp.example.org/pub/bert.pdf"))
 
     body = fetch(client, paper["id"]).json()
 
     assert body["full_text_status"] == "error"
-    assert "private" not in body["full_text_error"] and "local" not in body["full_text_error"]
-    assert "http" in body["full_text_error"].lower()
     assert upstream.requests == []
+    with fails_until_fixed():
+        assert "private" not in body["full_text_error"] and "local" not in body["full_text_error"]
+        assert "http" in body["full_text_error"].lower()
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Suspected app bug: a malformed link makes urlsplit() raise ValueError in "
+MALFORMED_LINKS = ["https://papers.example.org:99999/bert.pdf",  # an invalid port
+                   "http://[::1/bert.pdf"]  # a broken IPv6 literal
+
+
+@known_bug(
+    "Confirmed app bug: a malformed link makes urlsplit() raise ValueError in "
     "fulltext._check_public, which ensure_full_text does not catch, so /fulltext and /summary "
     "answer 500 instead of recording the failure and falling back to the abstract "
-    "(ensure_full_text docstring: expected failures are recorded 'rather than raised')."))
-@pytest.mark.parametrize("url", ["https://papers.example.org:99999/bert.pdf", "http://[::1/bert.pdf"],
-                         ids=["invalid port", "broken IPv6 literal"])
-def test_a_malformed_pdf_link_is_recorded_and_the_abstract_is_used(fake_llm, upstream, url):
+    "(ensure_full_text docstring: expected failures are recorded 'rather than raised').")
+def test_a_malformed_pdf_link_is_recorded_and_the_abstract_is_used(fake_llm, upstream):
     with TestClient(app, raise_server_exceptions=False) as client:
-        paper = save(client, meta(BERT_META, pdf_url=url))
+        replies = []
+        for n, url in enumerate(MALFORMED_LINKS):
+            paper = save(client, meta(BERT_META, external_id=f"W-malformed-{n}", doi=None, pdf_url=url))
+            replies.append((url, fetch(client, paper["id"]), client.post(f"/api/papers/{paper['id']}/summary")))
 
-        response = fetch(client, paper["id"])
-        assert response.status_code == 200
-        assert response.json()["full_text_status"] == "error"
-        assert response.json()["full_text_error"]
-        stream = events(client.post(f"/api/papers/{paper['id']}/summary"))
-
-    assert stream[0]["context"] == "abstract"
-    assert stream[-1]["type"] == "done"
     assert upstream.requests == []
+    with fails_until_fixed():
+        for url, fetched, summary in replies:
+            assert fetched.status_code == 200, url
+            assert fetched.json()["full_text_status"] == "error" and fetched.json()["full_text_error"], url
+            stream = events(summary)
+            assert (stream[0]["context"], stream[-1]["type"]) == ("abstract", "done"), url
+
+
+def test_a_paper_deleted_just_before_its_pdf_is_saved_is_404_and_nothing_is_stored(
+        client, upstream, paper, settings, monkeypatch):
+    upstream.get(PDF_URL, pdf_reply())
+    real_store_pdf = fulltext.store_pdf
+
+    def store_after_the_paper_was_deleted(data):
+        with SessionLocal() as session:  # the user removes the paper at this very moment
+            session.delete(session.get(Paper, paper["id"]))
+            session.commit()
+        return real_store_pdf(data)
+
+    monkeypatch.setattr(fulltext, "store_pdf", store_after_the_paper_was_deleted)
+
+    response = fetch(client, paper["id"])
+
+    assert (response.status_code, response.json()["detail"]) == (404, "Paper not found.")
+    assert list(settings.pdf_dir.iterdir()) == []
 
 
 def test_a_paper_deleted_during_its_download_is_404_and_nothing_is_stored(client, upstream, paper, settings):
@@ -282,30 +376,44 @@ def test_a_paper_deleted_during_its_download_is_404_and_nothing_is_stored(client
     assert not settings.pdf_dir.exists() or list(settings.pdf_dir.iterdir()) == []
 
 
-async def test_one_download_per_paper_at_a_time(upstream, dns):
-    # E.g. the reader's page load and a click on "Generate summary" both need the full text.
-    dns["papers.example.org"] = PUBLIC_IP
+def _stored_search_result(n: int) -> int:
     with SessionLocal() as session:
-        paper = Paper(source="openalex", external_id="W1", title="Paper", authors=[], pdf_url=PDF_URL)
+        paper = Paper(source="openalex", external_id=f"W{n}", title=f"Paper {n}", authors=[],
+                      pdf_url=f"https://papers.example.org/{n}.pdf")
         session.add(paper)
         session.commit()
-        paper_id = paper.id
-    release = asyncio.Event()
+        return paper.id
 
-    async def slow_pdf(request):
+
+async def _need_full_text(paper_id: int) -> bool:
+    """What a request that needs the paper's text does (e.g. GET /outline, POST /summary)."""
+    with SessionLocal() as session:
+        return await fulltext.ensure_full_text(session.get(Paper, paper_id), session)
+
+
+def _held_back(release: asyncio.Event):
+    async def reply(request):
         await release.wait()
         return httpx.Response(200, content=pdfs.sample_pdf())
 
-    upstream.get(PDF_URL, slow_pdf)
+    return reply
 
-    async def need_full_text() -> bool:
-        with SessionLocal() as session:
-            return await fulltext.ensure_full_text(session.get(Paper, paper_id), session)
 
-    first = asyncio.create_task(need_full_text())
-    second = asyncio.create_task(need_full_text())
-    for _ in range(200):  # both requests run as far as they can while the PDF is held back
+async def _let_tasks_run() -> None:
+    for _ in range(200):  # every request runs as far as it can while a PDF is held back
         await asyncio.sleep(0)
+
+
+async def test_one_download_per_paper_at_a_time(upstream, dns):
+    # E.g. the reader's page load and a click on "Generate summary" both need the full text.
+    dns["papers.example.org"] = PUBLIC_IP
+    paper_id = _stored_search_result(1)
+    release = asyncio.Event()
+    upstream.get("https://papers.example.org/1.pdf", _held_back(release))
+
+    first = asyncio.create_task(_need_full_text(paper_id))
+    second = asyncio.create_task(_need_full_text(paper_id))
+    await _let_tasks_run()
     assert len(upstream.requests) == 1
     release.set()
 
@@ -313,3 +421,35 @@ async def test_one_download_per_paper_at_a_time(upstream, dns):
     assert len(upstream.requests) == 1
     with SessionLocal() as session:
         assert session.get(Paper, paper_id).full_text_status == "ok"
+
+
+async def test_a_slow_download_does_not_hold_up_another_paper(upstream, dns):
+    dns["papers.example.org"] = PUBLIC_IP
+    slow, other = _stored_search_result(1), _stored_search_result(2)
+    release = asyncio.Event()
+    upstream.get("https://papers.example.org/1.pdf", _held_back(release))
+    upstream.get("https://papers.example.org/2.pdf", lambda request: httpx.Response(200, content=pdfs.sample_pdf()))
+
+    held = asyncio.create_task(_need_full_text(slow))
+    await _let_tasks_run()
+
+    assert await asyncio.wait_for(_need_full_text(other), timeout=5) is True  # did not wait for paper 1
+    release.set()
+    assert await held is True
+
+
+async def test_requests_waiting_for_the_download_of_a_paper_deleted_meanwhile_report_it_gone(upstream, dns):
+    dns["papers.example.org"] = PUBLIC_IP
+    paper_id = _stored_search_result(1)
+    release = asyncio.Event()
+    upstream.get("https://papers.example.org/1.pdf", _held_back(release))
+
+    first = asyncio.create_task(_need_full_text(paper_id))
+    second = asyncio.create_task(_need_full_text(paper_id))  # waits for the first one's download
+    await _let_tasks_run()
+    with SessionLocal() as session:  # the user removes the paper meanwhile
+        session.delete(session.get(Paper, paper_id))
+        session.commit()
+    release.set()
+
+    assert await asyncio.gather(first, second) == [False, False]  # both answer 404 Paper not found

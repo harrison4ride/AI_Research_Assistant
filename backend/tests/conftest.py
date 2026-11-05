@@ -3,8 +3,9 @@
 Every test runs against an isolated copy of the app:
 
 - Settings come only from this file (support/isolation.py). The repository's .env is never read.
-- The SQLite database and the PDFs live in a temporary folder, emptied before each test,
-  created for each test session and removed after it.
+- The SQLite database and the PDFs live in a temporary folder of the test process
+  (support/scratch.py), emptied before each test, created for each test session and removed
+  after it. Parallel workers (pytest -n) and forked children each get their own folder.
 - Module-level caches, locks, cooldowns, and background tasks start fresh in every
   test (support/app_state.py).
 - No real LLM can be reached. CLAUDE_CODE_PATH points at a missing file and the
@@ -24,7 +25,6 @@ import json
 import os
 import shutil
 import socket
-import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,13 +33,12 @@ from types import ModuleType
 import httpx
 import pytest
 
-# One scratch folder per process: app.db binds its engine to it at import, and a second
-# pytest session in the same process (which imports this file again) must use it too.
-_SCRATCH_VARIABLE = "RA_BACKEND_TESTS_SCRATCH"
-SCRATCH = Path(os.environ.get(_SCRATCH_VARIABLE) or tempfile.mkdtemp(prefix="ra-backend-tests-"))
-os.environ[_SCRATCH_VARIABLE] = str(SCRATCH)
+from support import scratch  # importing it reads no settings
+from support.isolation import isolate_settings  # importing it reads no settings
 
-from support.isolation import isolate_settings  # noqa: E402  (importing it reads no settings)
+# This process's scratch folder. Not inherited through the environment: a worker process or
+# a forked child gets its own (see support/scratch.py).
+SCRATCH = scratch.folder()
 
 isolate_settings(
     data_dir=SCRATCH / "data",
@@ -69,13 +68,17 @@ def _scratch_data_folder() -> None:
     """The data folder of this session, with an empty database.
 
     Made per session (not at import), so pytest can run the suite twice in one process;
-    pytest_sessionfinish removes it.
+    pytest_sessionfinish removes it. The engine is pointed at it explicitly because app.db
+    may have bound it to another process's folder (a child forked after the app loaded).
     """
-    config.get_settings().data_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = config.get_settings().data_dir
+    data_dir.mkdir(parents=True, exist_ok=True)
+    scratch.connect_engine_to(engine, data_dir / "app.db")
     init_db()
 
 
 def pytest_sessionfinish(session, exitstatus):
+    # Only this process's folder: other workers keep theirs until they finish.
     engine.dispose()
     shutil.rmtree(SCRATCH, ignore_errors=True)
 
@@ -131,16 +134,25 @@ def upstream(monkeypatch) -> Iterator[FakeUpstream]:
     assert not fake.unexpected, "The app sent requests that no test registered:\n" + "\n".join(fake.unexpected)
 
 
+class FakeDns(dict[str, str | list[str]]):
+    """Host name -> IP address (or a list of them), and every name the app looked up."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lookups: list[str] = []  # one entry per address check, IP literals included
+
+
 @pytest.fixture(autouse=True)
-def dns(monkeypatch) -> dict[str, str | list[str]]:
+def dns(monkeypatch) -> FakeDns:
     """Fake DNS for the PDF download's address check: maps host names to IP addresses.
 
     A name may map to one address or a list of them. IP literals resolve to
-    themselves; unknown names do not resolve.
+    themselves; unknown names do not resolve. `dns.lookups` records each lookup.
     """
-    hosts: dict[str, str | list[str]] = {}
+    hosts = FakeDns()
 
     async def getaddrinfo(self, host, port, *, family=0, type=0, proto=0, flags=0):
+        hosts.lookups.append(host)
         try:
             addresses = [ipaddress.ip_address(host)]
         except ValueError:

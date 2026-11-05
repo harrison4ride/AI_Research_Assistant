@@ -5,6 +5,8 @@ Also covers papers opened from search without saving (kept for CACHED_PAPER_DAYS
 
 import asyncio
 import json
+import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,16 +15,16 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, inspect, select, text, update
-from sqlalchemy.orm import sessionmaker
 
 import app.main as main_module
-from app import db
+from app import config, db
 from app.db import SessionLocal, engine
 from app.main import app
 from app.models import ChatMessage, Paper
+from app.routers import papers as papers_router
 from app.services import cache
 from app.services.cache import prune_cached_papers
-from support import pdfs
+from support import pdfs, scratch
 from support.papers import (
     ARXIV_META,
     BERT_META,
@@ -129,6 +131,16 @@ def test_doi_match_ignores_case(client, stored, sent):
     assert len(library(client)) == 1
 
 
+def test_an_arxiv_doi_matches_only_its_own_arxiv_paper(client):
+    bert_on_arxiv = save(client, meta(ARXIV_META, external_id="1810.04805", title=BERT_META["title"],
+                                      authors=BERT_META["authors"], abstract=BERT_META["abstract"], doi=None))
+
+    response = client.post("/api/papers", json=OPENALEX_META)  # DOI 10.48550/arxiv.1706.03762: another paper
+
+    assert response.status_code == 201 and response.json()["id"] != bert_on_arxiv["id"]
+    assert len(library(client)) == 2
+
+
 def test_different_papers_from_the_same_source_get_separate_entries(client):
     first = client.post("/api/papers", json=OPENALEX_META)
     second = client.post("/api/papers", json=BERT_META)  # also from OpenAlex
@@ -139,6 +151,44 @@ def test_different_papers_from_the_same_source_get_separate_entries(client):
 
 
 SAVE_AND_OPEN = pytest.mark.parametrize("endpoint", ["/api/papers", "/api/papers/open"], ids=["save", "open"])
+
+
+@SAVE_AND_OPEN
+def test_the_same_result_without_a_doi_is_kept_once(client, endpoint):
+    # Many OpenAlex works have no DOI: the source and its id still identify them.
+    result = meta(BERT_META, doi=None)
+
+    first = client.post(endpoint, json=result)
+    second = client.post(endpoint, json=result)
+
+    assert (first.status_code, second.status_code) == (201, 200)
+    assert second.json()["id"] == first.json()["id"]
+    assert stored_paper_count() == 1
+
+
+@SAVE_AND_OPEN
+def test_a_result_that_another_request_stores_at_the_same_moment_is_not_stored_twice(client, endpoint, monkeypatch):
+    # E.g. a double click: both requests look for the paper before either has stored it.
+    find_duplicate = papers_router.find_duplicate
+    other_request = {}
+
+    def the_other_request_stores_it_first(result, db):
+        if not other_request:  # not there yet when this request looks, but stored right after
+            with SessionLocal() as session:
+                paper = Paper(**result.model_dump(), in_library=endpoint == "/api/papers")
+                session.add(paper)
+                session.commit()
+                other_request["id"] = paper.id
+            return None
+        return find_duplicate(result, db)
+
+    monkeypatch.setattr(papers_router, "find_duplicate", the_other_request_stores_it_first)
+
+    response = client.post(endpoint, json=BERT_META)
+
+    assert response.status_code == 200 and response.json()["id"] == other_request["id"]
+    assert response.json()["in_library"] is (endpoint == "/api/papers")
+    assert stored_paper_count() == 1
 
 
 @SAVE_AND_OPEN
@@ -267,6 +317,7 @@ def test_non_numeric_paper_id_is_rejected(client, paper_id):
     ("müller", ["Über Graphen"]),  # non-ASCII author
     ("ÜBER", ["Über Graphen"]),  # non-ASCII case folding
     ("efficient", ["Eﬃcient Graph Kernels"]),  # ligature in the title
+    ("x", ["Attention Is All You Need"]),  # a first letter: only in that abstract ("complex")
     ("no such words", []),
 ])
 def test_filter_matches_title_author_and_abstract(client, query, expected):
@@ -468,6 +519,17 @@ def test_deleting_a_paper_removes_its_stored_pdf(client, settings):
     assert not stored.exists()
 
 
+def test_a_paper_whose_stored_pdf_is_already_gone_can_be_deleted(client, fake_llm, settings):
+    paper = upload_sample(client)
+    for stored in settings.pdf_dir.iterdir():
+        stored.unlink()  # e.g. removed by hand from DATA_DIR
+
+    response = client.delete(f"/api/papers/{paper['id']}")
+
+    assert response.status_code == 204
+    assert client.get(f"/api/papers/{paper['id']}").status_code == 404
+
+
 def test_a_pdf_shared_by_two_entries_is_kept_until_both_are_deleted(client, settings):
     uploaded = upload_sample(client)
     search_result = save(client, BERT_META)
@@ -530,6 +592,40 @@ def _stored_pdf(settings, name: str) -> Path:
     pdf_file = settings.pdf_dir / name
     pdf_file.write_bytes(pdfs.sample_pdf())
     return pdf_file
+
+
+def test_pruning_removes_every_stale_paper_with_its_own_pdf(settings):
+    first_pdf, second_pdf = _stored_pdf(settings, "a.pdf"), _stored_pdf(settings, "b.pdf")
+    _add_paper("W1", in_library=False, last_opened_days_ago=9, pdf_path="a.pdf")
+    _add_paper("W2", in_library=False, last_opened_days_ago=20, pdf_path="b.pdf")
+
+    assert prune_cached_papers() == 2
+
+    assert _existing_ids() == set()
+    assert not first_pdf.exists() and not second_pdf.exists()
+
+
+@pytest.fixture
+def local_time_far_from_utc():
+    """The machine's local time zone set to UTC-10 (Hawaii) for the test."""
+    original = os.environ.get("TZ")
+    os.environ["TZ"] = "HST10"
+    time.tzset()
+    yield
+    if original is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = original
+    time.tzset()
+
+
+def test_unsaved_papers_are_pruned_after_the_set_days_in_any_local_time_zone(local_time_far_from_utc):
+    # Times are stored in UTC, so the machine's time zone must not move the cutoff.
+    kept = _add_paper("W1", in_library=False, last_opened_days_ago=7 - 2 / 24)  # 2 hours short of a week
+    _add_paper("W2", in_library=False, last_opened_days_ago=7 + 2 / 24)  # 2 hours past it
+
+    assert prune_cached_papers() == 1
+    assert _existing_ids() == {kept}
 
 
 def test_pruning_removes_the_pdf_of_a_deleted_paper(settings):
@@ -696,35 +792,67 @@ CREATE TABLE papers (
 
 @pytest.fixture
 def older_database(tmp_path, monkeypatch):
-    """Point the app at a database file made by an older version (instead of the test database)."""
+    """Start the app on a database file made by an older version, instead of the test database.
+
+    The app's own engine opens its connections on that file, so every part of the app uses
+    it: the requests, the pruning at startup (services/cache.py), and the summary and chat
+    saves (routers/assistant.py), which hold SessionLocal rather than db.engine.
+    """
     path = tmp_path / "app.db"
-    old = create_engine(f"sqlite:///{path}")
-    monkeypatch.setattr(db, "engine", old)
-    monkeypatch.setattr(db, "SessionLocal", sessionmaker(bind=old, expire_on_commit=False))
+    test_database = scratch.database()
+    engine.dispose()
+    scratch.connect_engine_to(engine, path)
     monkeypatch.setattr(db, "DB_PATH", path)
-    yield old
-    old.dispose()
+    yield engine
+    engine.dispose()
+    scratch.connect_engine_to(engine, test_database)
 
 
-def test_an_older_database_is_upgraded_and_keeps_its_papers(older_database):
+def _papers_in_the_test_database() -> int:
+    test_database = create_engine(f"sqlite:///{config.get_settings().data_dir / 'app.db'}")
+    try:
+        with test_database.connect() as conn:
+            return conn.execute(text("SELECT count(*) FROM papers")).scalar_one()
+    finally:
+        test_database.dispose()
+
+
+def test_an_older_database_is_upgraded_and_keeps_its_papers(older_database, fake_llm):
+    # Saved a month ago, long before the unsaved-paper cutoff (CACHED_PAPER_DAYS).
+    created = (datetime.now(timezone.utc) - timedelta(days=30)).replace(microsecond=0)
     with older_database.begin() as conn:
         conn.execute(text(M2_PAPERS_TABLE))
         conn.execute(text(
             "INSERT INTO papers (id, source, external_id, title, authors, year, abstract, url, pdf_url, venue, doi, "
             "created_at) VALUES (1, 'arxiv', '1706.03762', 'Attention Is All You Need', '[\"Ashish Vaswani\"]', "
-            "2017, 'The abstract.', NULL, NULL, 'arXiv', NULL, '2026-10-05 12:00:00.000000')"))
+            "2017, 'The abstract.', NULL, NULL, 'arXiv', NULL, :created)"),
+            {"created": created.strftime("%Y-%m-%d %H:%M:%S.%f")})
 
-    with TestClient(app) as started:  # startup runs init_db()
+    with TestClient(app) as started:  # startup runs init_db(), then prunes unsaved papers
         papers = started.get("/api/papers").json()
         chat = started.get("/api/papers/1/chat")
+        answer = events(started.post("/api/papers/1/chat", json={"question": "What is new?"}))
 
     columns = {c["name"] for c in inspect(older_database).get_columns("papers")}
     assert {"pdf_path", "full_text", "summary", "in_library", "saved_at", "last_opened_at", "outline"} <= columns
-    # Papers saved before the reader existed are library papers, saved when they were created.
+    # Papers saved before the reader existed are library papers, saved when they were created,
+    # so the pruning at startup kept them, old as they are.
     [paper] = papers
     assert (paper["id"], paper["title"], paper["in_library"]) == (1, "Attention Is All You Need", True)
-    assert paper["saved_at"] == paper["created_at"] == "2026-10-05T12:00:00Z"
+    assert paper["saved_at"] == paper["created_at"] == created.strftime("%Y-%m-%dT%H:%M:%SZ")
     assert (chat.status_code, chat.json()) == (200, [])  # the newer chat table was created
+    # Questions work on the upgraded database, and their answers are saved in it.
+    assert answer[0]["context"] == "abstract" and answer[-1]["type"] == "done"
+    assert _conversations() == {1: ["What is new?", "This is a fake answer."]}
+
+    # Later the user opens a paper from search and leaves it unsaved: once it has not been
+    # opened for longer than CACHED_PAPER_DAYS, the next start removes it from this database.
+    stale = _add_paper("W1", in_library=False, last_opened_days_ago=8)
+    with TestClient(app):
+        pass
+
+    assert _existing_ids() == {1} and stale != 1
+    assert _papers_in_the_test_database() == 0  # nothing of this went to the test database
 
 
 def test_an_older_database_missing_a_required_column_stops_the_app_with_a_clear_error(older_database):

@@ -56,25 +56,18 @@ describe('LibraryPage', () => {
     expect(within(card).getByRole('link', { name: 'Open' })).toHaveAttribute('href', '#/paper/1')
   })
 
-  it('links to the stored PDF of a paper that has only that one', async () => {
-    setup()
+  // As in the search results, a card's "PDF ↗" is the open-access PDF when the paper has one,
+  // even if the library also stores a copy; papers without one (uploads) link the stored copy.
+  // (The reader always shows and opens the stored copy: PaperPage.test.tsx and PdfViewer.test.tsx.)
+  it('links the open-access PDF when there is one, and else the stored copy', async () => {
+    const withBoth = paper({ id: 3, pdf_url: 'https://publisher.example/paper.pdf', has_pdf: true, full_text_status: 'ok' })
+    const uploaded = paper({ id: 5, source: 'upload', url: null, pdf_url: null, has_pdf: true, full_text_status: 'ok' })
+    setup([withBoth, uploaded])
 
-    const card = (await screen.findAllByRole('article'))[1]
+    const [first, second] = await screen.findAllByRole('article')
 
-    expect(within(card).getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', '/api/papers/2/pdf')
-  })
-
-  // Suspected app bug: PaperCard documents `localPdfHref` as the "Link to a locally stored copy
-  // of the PDF, when the library has one", but uses `paper.pdf_url ?? localPdfHref`, so a stored
-  // copy is never linked when the paper also has an open-access link (which may be the very link
-  // whose download failed before the user attached the PDF).
-  it.fails('links to the stored copy of a paper that also has an open-access link', async () => {
-    const both = paper({ id: 3, pdf_url: 'https://publisher.example/paper.pdf', has_pdf: true, full_text_status: 'ok' })
-    setup([both])
-
-    const [card] = await screen.findAllByRole('article')
-
-    expect(within(card).getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', '/api/papers/3/pdf')
+    expect(within(first).getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', 'https://publisher.example/paper.pdf')
+    expect(within(second).getByRole('link', { name: 'PDF ↗' })).toHaveAttribute('href', '/api/papers/5/pdf')
   })
 
   it('explains an empty library', async () => {

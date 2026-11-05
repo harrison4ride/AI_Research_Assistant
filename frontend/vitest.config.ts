@@ -12,5 +12,7 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     restoreMocks: true,
     unstubGlobals: true,
+    // Only the app's stylesheet, which src/test/stylesheet.ts reads to check how things look.
+    css: { include: [/src\/index\.css/] },
   },
 })

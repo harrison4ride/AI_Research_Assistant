@@ -1,13 +1,31 @@
 // A stand-in for the backend: tests register answers per method and path, and every
 // request the app makes is recorded. Nothing reaches a real server. A request that no
-// test registered gets a 501 and fails the test (setup.ts checks after each test).
-import { vi } from 'vitest'
+// test registered gets a 501 and fails the test that made the mock (setup.ts checks
+// after each test).
+import { expect, vi } from 'vitest'
 
-// The requests that mocks made in the current test could not answer.
-const unanswered: string[] = []
+interface MockOfATest {
+  test: string
+  unhandled: string[]
+  ended: boolean
+}
 
+// The mocks made in the current test, and requests that reached a mock after its test ended.
+let current: MockOfATest[] = []
+const late: string[] = []
+
+// After each test: the requests its mocks could not answer. Its mocks then count as ended.
 export function takeUnansweredRequests(): string[] {
-  return unanswered.splice(0)
+  const requests = current.flatMap((mock) => mock.unhandled)
+  for (const mock of current) mock.ended = true
+  current = []
+  return requests
+}
+
+// After each file: unmocked requests the app sent after their test had ended. They are
+// reported with the test that made the mock, rather than failing whichever test runs next.
+export function takeLateRequests(): string[] {
+  return late.splice(0)
 }
 
 export interface Call {
@@ -93,6 +111,8 @@ export function mockFetch() {
   const routes: { method: string; path: string; reply: Reply }[] = []
   const calls: Call[] = []
   const unhandled: string[] = []
+  const mock: MockOfATest = { test: expect.getState().currentTestName ?? 'no test', unhandled, ended: false }
+  current.push(mock)
 
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost')
@@ -101,8 +121,9 @@ export function mockFetch() {
     calls.push(call)
     const route = [...routes].reverse().find((r) => r.method === method && r.path === url.pathname)
     if (!route) {
-      unhandled.push(`${method} ${url.pathname}${url.search}`)
-      unanswered.push(`${method} ${url.pathname}${url.search}`)
+      const request = `${method} ${url.pathname}${url.search}`
+      if (mock.ended) late.push(`${request} (sent after the test “${mock.test}” had ended)`)
+      else unhandled.push(request)
       return errorResponse(501, `No mock for ${method} ${url.pathname}`)
     }
     const { reply } = route

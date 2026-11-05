@@ -40,6 +40,9 @@ def test_answer_is_streamed_and_both_turns_are_saved(client, fake_llm):
     response = ask(client, paper["id"], "What datasets are used?")
 
     assert response.status_code == 200
+    # Streamed as it is written: neither cached nor held back by a proxy such as nginx.
+    assert response.headers["cache-control"].lower() == "no-cache"
+    assert response.headers["x-accel-buffering"].lower() == "no"
     stream = events(response)
     assert stream[0] == {"type": "meta", "context": "full_text", "truncated": False}
     assert streamed_text(stream) == "Natural Questions, TriviaQA, and WebQuestions."
