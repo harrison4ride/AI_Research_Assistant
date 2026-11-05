@@ -6,6 +6,9 @@
 |-------|-------|--------|--------|---------|-------|---------|
 | Backend (pytest) | 360 | 360 | 0 | 0 | 0 | 17.4 |
 | Frontend (Vitest) | 148 | 148 | 0 | 0 | 0 | 6.5 |
+| End-to-end (Playwright) | 14 | runs: 13/14, 14/14, 14/14, 14/14 | | | | |
+
+End-to-end tests that failed in at least one run: e2e/upload-summary-chat.spec.ts > summarize the sections and jump to one
 
 ## Coverage
 
@@ -22,31 +25,6 @@
 ## Hermeticity
 
 - backend tests that fail only without network: 0
-
-## Held-out seeded faults
-
-Detected 17/18 (backend 12/12, frontend 5/6; HW1-history faults 7/8).
-
-| Fault | Detected | Detecting tests |
-|-------|----------|-----------------|
-| B01 | yes | 1 |
-| B02 | yes | 2 |
-| B03 | yes | 1 |
-| B04 | yes | 3 |
-| B05 | yes | 1 |
-| B06 | yes | 2 |
-| B07 | yes | 72 |
-| B08 | yes | 3 |
-| B09 | yes | 16 |
-| B10 | yes | 1 |
-| B11 | yes | 1 |
-| B12 | yes | 2 |
-| F01 | yes | 1 |
-| F02 | no | 0 |
-| F03 | yes | 3 |
-| F04 | yes | 1 |
-| F05 | yes | 1 |
-| F06 | yes | 3 |
 
 ## Assertions
 

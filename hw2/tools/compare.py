@@ -74,17 +74,7 @@ def main() -> None:
         ("Calls to the claude stub", lambda m: cell((m.get("backend") or {}).get("llm_stub_calls"))),
     ])
 
-    def fa(key):
-        return lambda m: cell((m.get("faults") or {}).get(key))
-
-    table("Fault detection", [
-        ("Held-out faults detected", lambda m: cell(
-            None if "faults" not in m else f"{m['faults']['detected']}/{m['faults']['total']}")),
-        ("  backend", lambda m: cell(None if "faults" not in m else f"{m['faults']['detected_backend']}/{m['faults']['total_backend']}")),
-        ("  frontend", lambda m: cell(None if "faults" not in m else f"{m['faults']['detected_frontend']}/{m['faults']['total_frontend']}")),
-        ("  HW1-history faults", lambda m: cell(None if "faults" not in m else f"{m['faults']['detected_history']}/{m['faults']['total_history']}")),
-        ("Faults caught by only one test", lambda m: cell(
-            None if "faults" not in m else sum(1 for r in m["faults"]["results"].values() if len(r["detected_by"]) == 1))),
+    table("Mutation testing", [
         ("Mutation score (killed / all)", lambda m: cell((m["mutation"] or {}).get("score_all"), "{}%")),
         ("Surviving mutants", lambda m: cell((m["mutation"] or {}).get("counts", {}).get("survived"))),
     ])
@@ -96,20 +86,6 @@ def main() -> None:
         ("Frontend test blocks", lambda m: cell((m.get("static") or {}).get("frontend", {}).get("test_blocks"))),
         ("Frontend expect() per test", lambda m: cell((m.get("static") or {}).get("frontend", {}).get("mean_assertions"))),
     ])
-
-    # Per-fault matrix: how many tests catch each fault in each phase.
-    all_faults = sorted({f for _, m in phases for f in (m.get("faults") or {}).get("results", {})})
-    if all_faults:
-        out.append("### Detecting tests per held-out fault\n")
-        out.append("| Fault | " + " | ".join(names) + " |")
-        out.append("|---|" + "---|" * len(names))
-        for f in all_faults:
-            row = []
-            for _, m in phases:
-                r = (m.get("faults") or {}).get("results", {}).get(f)
-                row.append("–" if r is None else ("missed" if not r["detected"] else str(len(r["detected_by"]))))
-            out.append(f"| {f} | " + " | ".join(row) + " |")
-        out.append("")
 
     # Mutation score per module.
     mods = sorted({mod for _, m in phases if m["mutation"] for mod in m["mutation"]["by_module"]})
@@ -132,7 +108,6 @@ def main() -> None:
         "frontend_line": ((m.get("frontend") or {}).get("coverage") or {}).get("line_pct"),
         "frontend_branch": ((m.get("frontend") or {}).get("coverage") or {}).get("branch_pct"),
         "mutation": (m["mutation"] or {}).get("score_all"),
-        "faults": (m.get("faults") or {}).get("detected"),
     } for name, m in phases}
     Path("evidence/final").mkdir(parents=True, exist_ok=True)
     Path("evidence/final/chart-data.json").write_text(json.dumps(chart, indent=2) + "\n")

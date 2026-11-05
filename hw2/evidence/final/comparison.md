@@ -31,15 +31,10 @@
 | Backend tests failing without network | 0 | 0 | 0 |
 | Calls to the claude stub | 0 | 0 | 0 |
 
-### Fault detection
+### Mutation testing
 
 | Measure | initial | round1 | round2 |
 |---|---|---|---|
-| Held-out faults detected | 17/18 | 17/18 | 17/18 |
-|   backend | 12/12 | 12/12 | 12/12 |
-|   frontend | 5/6 | 5/6 | 5/6 |
-|   HW1-history faults | 7/8 | 7/8 | 7/8 |
-| Faults caught by only one test | 8 | 7 | 6 |
 | Mutation score (killed / all) | 76.1% | 77.6% | 89.4% |
 | Surviving mutants | 661 | 619 | 289 |
 
@@ -52,29 +47,6 @@
 | Backend status-code-only tests | 4 | 3 | 3 |
 | Frontend test blocks | 140 | 169 | 166 |
 | Frontend expect() per test | 2.29 | 2.55 | 2.59 |
-
-### Detecting tests per held-out fault
-
-| Fault | initial | round1 | round2 |
-|---|---|---|---|
-| B01 | 1 | 1 | 1 |
-| B02 | 2 | 2 | 2 |
-| B03 | 1 | 1 | 2 |
-| B04 | 3 | 4 | 4 |
-| B05 | 1 | 1 | 1 |
-| B06 | 2 | 2 | 2 |
-| B07 | 72 | 98 | 108 |
-| B08 | 3 | 4 | 4 |
-| B09 | 16 | 19 | 20 |
-| B10 | 1 | 3 | 4 |
-| B11 | 1 | 1 | 1 |
-| B12 | 2 | 2 | 2 |
-| F01 | 1 | 1 | 1 |
-| F02 | missed | missed | missed |
-| F03 | 3 | 3 | 3 |
-| F04 | 1 | 1 | 1 |
-| F05 | 1 | 1 | 1 |
-| F06 | 3 | 3 | 3 |
 
 ### Mutation score per module (killed / all mutants)
 

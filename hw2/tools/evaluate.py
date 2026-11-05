@@ -12,7 +12,6 @@ Steps (--steps, comma-separated; default all):
   flaky     N extra runs per suite in random order; tests whose outcome changes
   parallel  pytest with 8 worker processes (pytest-xdist): is the suite process-safe?
   hermetic  pytest with sockets disabled except localhost (pytest-socket)
-  faults    held-out seeded faults (tools/faults/*.patch): which tests detect each
   static    tests and assertions per test (AST for Python, a scanner for TS)
   e2e       the Playwright suite, run --e2e-runs times in full (browser installed first)
 
@@ -54,9 +53,8 @@ def find_repo() -> Path:
 
 
 REPO = find_repo()
-FAULTS = HERE / "faults"
 STUBS = HERE / "stubs"
-ALL_STEPS = ["setup", "backend", "frontend", "flaky", "parallel", "hermetic", "faults", "static", "e2e"]
+ALL_STEPS = ["setup", "backend", "frontend", "flaky", "parallel", "hermetic", "static", "e2e"]
 
 # Test-only tools the harness adds when the suite does not declare them itself.
 # Pinned to the versions the HW2 evaluation used.
@@ -378,63 +376,6 @@ class Phase:
         self.metrics["hermetic"] = {"run": r, "fail_only_without_network": network}
         self.save()
 
-    # -------------------------------------------------------------------------- faults
-
-    def faults(self) -> None:
-        manifest = json.loads((FAULTS / "manifest.json").read_text())
-        base = {
-            "backend": junit_outcomes(self.out / "junit" / "backend.xml"),
-            "frontend": junit_outcomes(self.out / "junit" / "frontend.xml"),
-        }
-        flaky = self.metrics.get("flaky", {})
-        base_secs = {
-            "backend": (self.metrics.get("backend", {}).get("run") or {}).get("seconds") or 60,
-            "frontend": (self.metrics.get("frontend", {}).get("run") or {}).get("seconds") or 60,
-        }
-        results = {}
-        for fault in manifest:
-            fid, layer = fault["id"], fault["layer"]
-            present = self.backend_tests() if layer == "backend" else self.frontend_tests()
-            if not present:
-                results[fid] = {"detected": False, "detected_by": [], "note": "no tests for this layer"}
-                continue
-            patch = FAULTS / f"{fid}.patch"
-            subprocess.run(["git", "apply", str(patch)], cwd=self.wt, check=True)
-            try:
-                timeout = max(300, 6 * base_secs[layer])
-                if layer == "backend":
-                    r, outcomes = self.run_backend(f"fault-{fid}", timeout=timeout)
-                else:
-                    r, outcomes = self.run_frontend(f"fault-{fid}", timeout=timeout)
-            finally:
-                subprocess.run(["git", "apply", "-R", str(patch)], cwd=self.wt, check=True)
-            unstable = set(flaky.get(layer, []))
-            detected_by = sorted(
-                t for t, o in outcomes.items()
-                if o["outcome"] == "failed" and base[layer].get(t, {}).get("outcome") == "passed" and t not in unstable
-            )
-            hang = r["timed_out"]
-            results[fid] = {
-                "detected": bool(detected_by) or hang,
-                "detected_by": detected_by,
-                "timed_out": hang,
-                "seconds": r["seconds"],
-            }
-            log(f"fault {fid}: {'DETECTED' if results[fid]['detected'] else 'missed'} ({len(detected_by)} tests)")
-        hist = [f["id"] for f in manifest if f["origin"].startswith("history")]
-        self.metrics["faults"] = {
-            "results": results,
-            "detected": sum(r["detected"] for r in results.values()),
-            "total": len(results),
-            "detected_history": sum(results[i]["detected"] for i in hist),
-            "total_history": len(hist),
-            "detected_backend": sum(r["detected"] for k, r in results.items() if k.startswith("B")),
-            "total_backend": sum(1 for k in results if k.startswith("B")),
-            "detected_frontend": sum(r["detected"] for k, r in results.items() if k.startswith("F")),
-            "total_frontend": sum(1 for k in results if k.startswith("F")),
-        }
-        self.save()
-
     # ----------------------------------------------------------------------------- e2e
 
     def e2e(self, runs: int) -> None:
@@ -630,7 +571,7 @@ def write_summary(m: dict, out: Path) -> None:
             lines.append(f"| {name} | none | | | | | |")
     if m.get("e2e"):
         e = m["e2e"]
-        runs = ", ".join(f"{r['passed']}/{r['passed'] + r['failed'] + r['skipped']}" for r in e["runs"])
+        runs = ", ".join(f"{r['passed']}/{r['passed'] + r['failed'] + r.get('skipped', 0)}" for r in e["runs"])
         lines.append(f"| End-to-end (Playwright) | {e['tests']} | runs: {runs} | | | | |")
         if e["flaky"]:
             lines.append("")
@@ -649,14 +590,6 @@ def write_summary(m: dict, out: Path) -> None:
         net = m["hermetic"]["fail_only_without_network"]
         lines += ["", "## Hermeticity", "", f"- backend tests that fail only without network: {len(net)}"]
         lines += [f"  - {t}" for t in net[:20]]
-    if "faults" in m:
-        fa = m["faults"]
-        lines += ["", "## Held-out seeded faults", "",
-                  f"Detected {fa['detected']}/{fa['total']} (backend {fa['detected_backend']}/{fa['total_backend']}, "
-                  f"frontend {fa['detected_frontend']}/{fa['total_frontend']}; HW1-history faults {fa['detected_history']}/{fa['total_history']}).",
-                  "", "| Fault | Detected | Detecting tests |", "|-------|----------|-----------------|"]
-        for fid, r in fa["results"].items():
-            lines.append(f"| {fid} | {'yes' if r['detected'] else 'no'} | {len(r.get('detected_by', []))} |")
     if "static" in m:
         sb, sf = m["static"]["backend"], m["static"]["frontend"]
         lines += ["", "## Assertions", "",
@@ -694,7 +627,7 @@ def main() -> None:
         log(f"== {step}")
         {"setup": phase.setup, "backend": phase.backend_main, "frontend": phase.frontend_main,
          "flaky": lambda: phase.flaky(args.runs), "parallel": phase.parallel, "hermetic": phase.hermetic,
-         "faults": phase.faults, "static": phase.static, "e2e": lambda: phase.e2e(args.e2e_runs)}[step]()
+         "static": phase.static, "e2e": lambda: phase.e2e(args.e2e_runs)}[step]()
     write_summary(phase.metrics, out)
     log(f"summary: {out / 'summary.md'}")
 

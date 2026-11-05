@@ -24,31 +24,6 @@
 
 - backend tests that fail only without network: 0
 
-## Held-out seeded faults
-
-Detected 17/18 (backend 12/12, frontend 5/6; HW1-history faults 7/8).
-
-| Fault | Detected | Detecting tests |
-|-------|----------|-----------------|
-| B01 | yes | 1 |
-| B02 | yes | 2 |
-| B03 | yes | 1 |
-| B04 | yes | 4 |
-| B05 | yes | 1 |
-| B06 | yes | 2 |
-| B07 | yes | 98 |
-| B08 | yes | 4 |
-| B09 | yes | 19 |
-| B10 | yes | 3 |
-| B11 | yes | 1 |
-| B12 | yes | 2 |
-| F01 | yes | 1 |
-| F02 | no | 0 |
-| F03 | yes | 3 |
-| F04 | yes | 1 |
-| F05 | yes | 1 |
-| F06 | yes | 3 |
-
 ## Assertions
 
 - backend: 304 test functions in 12 files, 2.69 assertions per test; 0 without assertions; 3 that check only the status code

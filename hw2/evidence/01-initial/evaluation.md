@@ -132,11 +132,6 @@ that the suite misses (`bugs.md`), each confirmed by reproduction or code readin
 | BUG-7 | low | After a refused PDF attachment, the "Attach PDF" button disappears |
 | BUG-8 | low | "Search OpenAlex instead" appears for any error and searches the current input |
 
-**Held-out seeded faults:** detected **17 of 18** (backend 12/12, frontend 5/6,
-HW1-history faults 7/8). Missed: F02 (validation-error messages from FastAPI's 422
-arrays lost when there is only one error). The margin is thin: 8 of the 17 were caught
-by exactly one test.
-
 **Mutation testing (mutmut, 9 backend modules listed, of which 8 yield mutants, 2,787 mutants):** **76.1%** killed
 (2,120); 661 survived; 6 timed out. (The serial re-run, used for all phases, gave exactly the same 661 survivors.) By module: openalex 93.8%, arxiv 83.8%, cache 81.0%, assistant
 80.1%, papers 78.3%, llm 76.3%, fulltext 73.4%, pdf 67.2%. Survivors cluster in section
@@ -148,7 +143,7 @@ and the private-address check `_check_public` (17).
 ## 7. Summary
 
 The initial suite is large, well isolated, and runs from a clean checkout. Its line
-coverage (94% backend) and seeded-fault score (17/18) are high, but the deeper checks
+coverage (94% backend) is high, but the deeper checks
 show the gap between "executes the code" and "checks the behavior": 14% of tests are
 weak, brittle, redundant, flaky, or wrong; a quarter of backend mutants survive; and
 the suite misses 8 real bugs, including three of medium severity. These findings are

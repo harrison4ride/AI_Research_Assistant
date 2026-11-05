@@ -24,8 +24,6 @@ changed (2,872 lines added, 531 removed). Application code unchanged (verified w
 | Unit tests changing outcome in 5 shuffled runs | 0 | 0 |
 | Backend tests failing without network | 0 | 0 |
 | Backend with 8 parallel workers (`pytest -n 8`) | 360 passed | **26 failed, 206 errors** |
-| Held-out faults detected | 17/18 | 17/18 (F02 still missed) |
-| Faults caught by only one test | 8 | 7 (first reported as 6; see `../final/faults-rerun.md`) |
 | Mutation score (serial) | 76.1% (identical to its parallel run) | 77.6% |
 | Backend assertions per test | 2.39 | 2.69 |
 | Frontend `expect()` per test | 2.29 | 2.55 |

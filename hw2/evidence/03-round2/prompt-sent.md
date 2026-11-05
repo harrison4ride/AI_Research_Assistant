@@ -1,6 +1,6 @@
 # Round 2 prompt (sent verbatim to a fresh-context Claude Code subagent)
 
-Date: 2026-11-04. Strategy: **execution feedback and owner decisions**: the owner's answers about the suspected bugs, a code review of round 1's changes with each claim checked by running the tests, a parallel test run, and serial mutation testing of the backend (`feedback-round2.md`, with the 619 surviving mutants in `mutation-survivors.md` beside it). The agent never sees the held-out faults.
+Date: 2026-11-04. Strategy: **execution feedback and owner decisions**: the owner's answers about the suspected bugs, a code review of round 1's changes with each claim checked by running the tests, a parallel test run, and serial mutation testing of the backend (`feedback-round2.md`, with the 619 surviving mutants in `mutation-survivors.md` beside it).
 
 ```text
 

@@ -21,11 +21,11 @@ same at all four tags.
 
 | Folder | Contents |
 |--------|----------|
-| `evidence/00-baseline/` | Environment, and the list of held-out faults |
+| `evidence/00-baseline/` | The environment the evaluation ran in |
 | `evidence/01-initial/` | The prompt, the agent's report, the correctness review by five reviewer agents (`review/`, with their prompts), the confirmed bugs, the code review, and the evaluation |
 | `evidence/02-round1/` | The feedback and prompt for round 1, the agent's report, the code review of its changes, the parallel-run regression, and the evaluation |
 | `evidence/03-round2/` | The feedback and prompt for round 2, the agent's report, run notes, the code review and the experiments that verified it, a spot check of "equivalent" mutants, the final correctness review (`review/`), and the evaluation |
-| `evidence/final/` | The three phases compared (`comparison.md`), and a note on rerunning the held-out faults |
+| `evidence/final/` | The three phases compared (`comparison.md`) |
 
 Each phase's `eval/` folder holds `metrics.json` (every measure), `summary.md`,
 `mutation.json`, and `mutation-survivors.md` (the diff of every surviving mutant). Raw
@@ -36,11 +36,9 @@ is the readable summary.
 
 | File | Purpose |
 |------|---------|
-| `tools/evaluate.py` | Measures one phase: checks the tag out into a fresh git worktree, installs from the lock files, and runs the suites with coverage, 5 shuffled runs, 8 parallel workers, no network, the held-out faults, assertion counts, and 4 end-to-end runs |
+| `tools/evaluate.py` | Measures one phase: checks the tag out into a fresh git worktree, installs from the lock files, and runs the suites with coverage, 5 shuffled runs, 8 parallel workers, no network, assertion counts, and 4 end-to-end runs |
 | `tools/mutation.py` | Mutation testing with mutmut, one mutant at a time. It lists 9 backend modules; 8 yield mutants, because the search router's only function is a decorated route handler, which mutmut does not mutate |
 | `tools/compare.py` | Prints the comparison tables in `evidence/final/comparison.md` |
-| `tools/build_faults.py` | Builds the held-out fault patches from `hw2-baseline` |
-| `tools/faults/` | The 18 held-out faults: one patch each, described in `manifest.json` |
 | `tools/stubs/claude` | Stands in for the Claude Code CLI during evaluation; it fails and logs every call, so no test reaches a real LLM |
 | `tools/mutmut_support/hw2_reload.py` | A pytest plugin that lets mutmut run the suite several times in one process |
 | `tools/review-rubric.md` | The rubric the reviewer agents used |
@@ -67,7 +65,7 @@ python3 tools/compare.py initial=evidence/01-initial/eval \
 
 - `evaluate.py` takes about 10 minutes per phase and uses port 8765 for the end-to-end
   runs. Run it on an otherwise idle machine: under heavy load, timing-sensitive tests can
-  fail and be counted as fault detections (`evidence/final/faults-rerun.md`).
+  time out.
 - `mutation.py` needs the worktree that `evaluate.py` created (the same `--scratch`) and
   runs about 2,800 mutants, about an hour. Add `--rerun-timeouts` to run the mutants that
   timed out again.

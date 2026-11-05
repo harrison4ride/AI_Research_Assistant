@@ -28,15 +28,10 @@ dependencies.
 | Unit tests changing outcome in 5 shuffled runs | 0 | 0 | 0 |
 | Backend tests failing without network | 0 | 0 | 0 |
 | Backend with 8 parallel workers (`pytest -n 8`) | 360 passed | 26 failed, 206 errors | 553 passed + 5 xfail (same as serial) |
-| Held-out faults detected | 17/18 | 17/18 | 17/18 (F02 still missed) |
-| Faults caught by only one test | 8 | 7 | 6 |
 | Mutation score (serial) | 76.1% | 77.6% | 89.4% (2,492 killed, 289 survived, 6 timeouts) |
 | Backend assertions per test | 2.39 | 2.69 | 2.59 |
 | Frontend `expect()` per test | 2.29 | 2.55 | 2.59 |
 | Confirmed application bugs the suite flags | 0 of 8 | 8 of 8 | 8 of 8 |
-
-No known-bug test (backend `@known_bug`, frontend `itFailsUntilFixed`) appears among the
-detectors of any held-out fault, so the expected failures cause no false detections.
 
 ## Claims of the agent's report, checked
 
@@ -148,8 +143,8 @@ download, and the paper's lock, going indefinitely (V3).
   changed in round 2 carry 6 of the 12 BRITTLE and both WRONG ratings.
 - My rule of exactly one expected failure per bug made the bug checks coarser: in 4 of the
   5 backend ones, a correct fix can stay hidden or an unrelated error counts as the bug.
-- Coverage is at its ceiling (98.6% of backend lines) and the held-out fault score did not
-  move in any phase (17/18). The missed fault, F02, is in an area no feedback targeted.
+- Coverage is at its ceiling (98.6% of backend lines), so coverage feedback had little
+  left to add.
 - Fresh reviewers keep finding real bugs: 10 new possible bugs, none detected by any
   version of the suite.
 - The evaluator's own feedback produced one brittle test (the 15,000-character bound), and

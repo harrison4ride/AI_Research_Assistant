@@ -4,7 +4,7 @@ Date: 2026-11-04. Strategy: **requirements + review findings + coverage report**
 The agent gets the curated feedback in `feedback-round1.md` (copied here). That file
 states intended behavior for every problem but deliberately does not list the
 application bugs the review found; those are reserved for round 2's execution
-feedback. The agent never sees the held-out faults or the mutation results.
+feedback. The agent never sees the mutation results.
 
 ```text
 You are working in the repository at
