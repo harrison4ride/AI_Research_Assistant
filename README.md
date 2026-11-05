@@ -137,11 +137,13 @@ AI_Research_Assistant/
 │   │       ├── cache.py                deletes unsaved papers not opened for CACHED_PAPER_DAYS
 │   │       ├── llm.py                  Claude prompts, streaming, model menu, provider choice
 │   │       └── claude_code.py          runs the local Claude Code CLI
+│   ├── tests/                 pytest suite, with fakes for the network and the LLM
 │   ├── pyproject.toml, uv.lock
 │   └── data/                  created at runtime; git-ignored
 ├── frontend/
 │   ├── index.html             page shell, with the Content-Security-Policy
-│   └── src/
+│   ├── e2e/                   Playwright end-to-end tests
+│   └── src/                   unit tests (*.test.ts, *.test.tsx) sit next to the code
 │       ├── pages/             SearchPage, LibraryPage, PaperPage (the reader)
 │       ├── components/        PdfViewer, SectionsPanel, ModelSelect, SummaryPanel,
 │       │                      ChatPanel, PaperCard, UploadBox, …
@@ -149,9 +151,10 @@ AI_Research_Assistant/
 │       ├── router.ts          hash routes: #/search, #/library, #/paper/{id}
 │       ├── useLlmStream.ts    state of one streamed summary or answer
 │       ├── useModelChoice.ts  the model menu choice, kept in localStorage
-│       └── types.ts           shared types
+│       ├── types.ts           shared types
+│       └── test/              helpers for the unit tests (fetch mock, fixtures)
 ├── scripts/setup.sh           checks requirements and installs everything
-├── docs/                      requirements, plan, development log
+├── docs/                      requirements, plan, development log, testing guide
 ├── INSTALL.md                 detailed installation guide
 └── Makefile, .env.example
 ```
@@ -216,6 +219,20 @@ limits, how long an unsaved paper is kept without being opened (`CACHED_PAPER_DA
 default 7 days), and the data folder (`DATA_DIR`). See
 [INSTALL.md § Environment Variables](INSTALL.md#environment-variables) for the full table.
 
+## Tests
+
+```bash
+make test        # backend (pytest), frontend (Vitest), and end-to-end (Playwright) suites
+make coverage    # line and branch coverage of the backend and frontend
+```
+
+The tests never call a real LLM or an outside service, and they never read `.env` or
+your library in `backend/data/`. The first `make test` downloads Chromium (about 210 MB)
+for the end-to-end tests. Nine of the tests are expected failures that check known bugs
+the app does not fix yet. [docs/TESTING.md](docs/TESTING.md) explains what each suite
+checks, how the tests are isolated, how to reproduce the coverage numbers, and which
+bugs are known.
+
 ## API Reference
 
 | Method and path | Description |
@@ -278,7 +295,8 @@ Interactive API docs are at <http://localhost:8000/docs> while the backend runs.
   `Retry-After` header asks (at most 10 minutes). During a pause, searches fail at
   once with a message, and uploads skip the arXiv metadata lookup. Repeated searches
   within 10 minutes reuse earlier results.
-- There are no automated tests yet (HW2 adds them).
+- Some known bugs are not fixed yet. [docs/TESTING.md § Known Bugs](docs/TESTING.md#known-bugs)
+  lists them; each has a test that will start failing on purpose once it is fixed.
 
 ## Development Process
 
@@ -291,3 +309,9 @@ script, the Claude Code provider, and M6 also went through a multi-agent verific
 workflow before `/code-review`. After M6, the default `CACHED_PAPER_DAYS` went from 30
 to 7 days. [docs/DEVLOG.md](docs/DEVLOG.md) records what each review found, and
 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) lists the assignment requirements.
+
+For HW2, Claude Code generated the automated tests. A fresh-context agent wrote the
+initial suite (tag `hw2-initial`), and two more agents improved it from review,
+coverage, and mutation-testing feedback (tags `hw2-round1` and `hw2-round2`). The
+application code did not change during that work; it is the code at tag
+`hw2-baseline`.

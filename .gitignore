@@ -18,6 +18,12 @@ backend/data/
 node_modules/
 frontend/dist/
 
+# Test coverage reports (make coverage)
+backend/.coverage
+backend/.coverage.*
+backend/htmlcov/
+frontend/coverage/
+
 # OS / editor
 .DS_Store
 .idea/

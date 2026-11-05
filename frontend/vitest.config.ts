@@ -14,5 +14,13 @@ export default defineConfig({
     unstubGlobals: true,
     // Only the app's stylesheet, which src/test/stylesheet.ts reads to check how things look.
     css: { include: [/src\/index\.css/] },
+    // `npm run test:coverage` (make coverage-frontend) measures the app's code, not the
+    // tests or their helpers.
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**'],
+      reporter: ['text', 'html'],
+    },
   },
 })

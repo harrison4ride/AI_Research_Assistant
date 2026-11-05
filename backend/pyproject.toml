@@ -22,6 +22,7 @@ package = false
 dev = [
     "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1.post1",
+    "pytest-cov>=7.1.0",
 ]
 
 [tool.pytest.ini_options]
@@ -36,3 +37,8 @@ filterwarnings = [
     # Emitted by PyMuPDF's SWIG bindings at import; not about this app.
     "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
 ]
+
+[tool.coverage.run]
+# `make coverage-backend` measures line and branch coverage of the app, not of the tests.
+source = ["app"]
+branch = true

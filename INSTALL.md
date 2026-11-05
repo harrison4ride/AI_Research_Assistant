@@ -36,7 +36,7 @@ missing.
 | [Node.js](https://nodejs.org) | 22.13 or later (tested with 22.22.0) | Builds and serves the frontend | Installer from nodejs.org, `brew install node`, or `nvm install 22` | `node --version` |
 | npm | Comes with Node.js (tested with 10.9.4) | Installs the frontend packages | Included with Node.js | `npm --version` |
 | git | Any | Cloning the repository | `xcode-select --install` (macOS) or `sudo apt install git` | `git --version` |
-| make | Any (optional) | The `make dev` / `make start` shortcuts | `xcode-select --install` (macOS) or `sudo apt install make` | `make --version` |
+| make | Any (optional) | The `make dev`, `make start`, `make test`, and `make coverage` shortcuts; [docs/TESTING.md](docs/TESTING.md) lists the commands behind the test targets | `xcode-select --install` (macOS) or `sudo apt install make` | `make --version` |
 | [Claude Code](https://claude.com/claude-code) | 2.1.248 or later (tested with 2.1.293), logged in | Summaries and Q&A by default, through your own Claude Code login. Not needed with `LLM_PROVIDER=api`. | `npm install -g @anthropic-ai/claude-code`, or see the [setup guide](https://code.claude.com/docs/en/setup); then run `claude` once and log in | `claude --version`, then `claude auth status` |
 
 The Node.js minimum comes from PDF.js 6 (the reader's PDF viewer), which requires
@@ -115,8 +115,9 @@ download caches in your home directory, shared with your other projects.
 
 | Location | Contents | Size (approx.) |
 |----------|----------|----------------|
-| `backend/.venv/` | Python packages | 130 MB |
-| `frontend/node_modules/` | JavaScript packages | 170 MB |
+| `backend/.venv/` | Python packages | 140 MB |
+| `frontend/node_modules/` | JavaScript packages | 240 MB |
+| `frontend/node_modules/playwright-core/.local-browsers/` | Chromium for the end-to-end tests, downloaded the first time you run `make test-e2e` or `make test` | 210 MB |
 | `backend/data/` | Created at runtime: the SQLite database and stored PDFs, for both library papers and unsaved papers (deleted after `CACHED_PAPER_DAYS` days without being opened) | Grows with your library |
 | `~/.local/share/uv/python/` | Python 3.11, only if uv had to download it | 85 MB |
 | `~/.cache/uv/` | uv's package download cache | 100 MB |
@@ -137,6 +138,9 @@ Exact versions are locked in `backend/uv.lock`; `uv sync --locked` installs exac
 | python-multipart | 0.0.32 | Parses PDF uploads |
 | pymupdf | 1.28.2 | Extracts text, layout, and the section outline (bookmarks or headings) from PDFs |
 | anthropic | 1.12.0 | Official client for the Claude API |
+| pytest | 9.2.0 | Runs the backend tests (tests only) |
+| pytest-asyncio | 1.4.1.post1 | Async test support (tests only) |
+| pytest-cov (with coverage) | 7.1.0 (7.17.2) | Line and branch coverage, `make coverage-backend` (tests only) |
 
 ### Frontend Packages (JavaScript)
 
@@ -153,6 +157,10 @@ Exact versions are locked in `frontend/package-lock.json`; `npm ci` installs exa
 | typescript | 6.0.3 | Type checking during the build (dev only) |
 | oxlint | 1.87.0 | Linter, `npm run lint` (dev only) |
 | @types/react, @types/react-dom, @types/node | 19.3.0, 19.3.0, 24.19.1 | Type definitions (dev only) |
+| vitest, @vitest/coverage-v8 | 5.1.0, 5.1.0 | Runs the frontend unit tests and measures their coverage (dev only) |
+| @testing-library/react, /dom, /jest-dom, /user-event | 16.3.3, 10.4.2, 7.0.1, 14.6.8 | Renders components and simulates the user in those tests (dev only) |
+| jsdom | 29.1.1 | Browser environment for the unit tests (dev only) |
+| @playwright/test | 1.64.1 | Runs the end-to-end tests in Chromium (dev only) |
 
 ## Environment Variables
 
@@ -323,6 +331,10 @@ Open <http://localhost:8000>.
 5. Go to the **Summary** tab and click **Generate summary**, or click **Summarize
    sections** in the **Sections** tab. If Claude Code is missing or logged out (or, in
    `api` mode, the key is missing or wrong), the reader says so.
+6. Optionally, run `make test`. The tests need no API key and no Claude Code login,
+   and they contact no outside service; the first run downloads Chromium (about 210 MB)
+   for the end-to-end tests. [docs/TESTING.md](docs/TESTING.md) lists the commands
+   without `make` and the expected results.
 
 ## Troubleshooting
 
