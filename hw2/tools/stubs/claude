@@ -1,0 +1,7 @@
+#!/bin/sh
+# Evaluation stand-in for the Claude Code CLI. Any test that reaches the real
+# CLI path during evaluation lands here: the call is logged and fails, so no
+# test can spend real LLM usage, and the log shows which runs tried.
+echo "$(date '+%Y-%m-%d %H:%M:%S') claude $*" >> "${HW2_LLM_STUB_LOG:-/dev/null}"
+echo "claude (evaluation stub): real LLM calls are disabled" >&2
+exit 1

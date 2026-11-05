@@ -1,0 +1,79 @@
+{
+  "rc": 0,
+  "seconds": 380,
+  "modules": [
+    "app/services/arxiv.py",
+    "app/services/openalex.py",
+    "app/services/pdf.py",
+    "app/services/fulltext.py",
+    "app/services/cache.py",
+    "app/services/llm.py",
+    "app/routers/search.py",
+    "app/routers/papers.py",
+    "app/routers/assistant.py"
+  ],
+  "counts": {
+    "killed": 2760,
+    "survived": 22,
+    "timeout": 5
+  },
+  "mutants": 2787,
+  "killed": 2760,
+  "score_all": 99.0,
+  "score_covered": 99.0,
+  "by_module": {
+    "app.routers.assistant": {
+      "killed": 146
+    },
+    "app.routers.papers": {
+      "killed": 251,
+      "survived": 2
+    },
+    "app.services.arxiv": {
+      "killed": 373,
+      "survived": 3
+    },
+    "app.services.cache": {
+      "killed": 42
+    },
+    "app.services.fulltext": {
+      "killed": 252
+    },
+    "app.services.llm": {
+      "killed": 680,
+      "survived": 8,
+      "timeout": 5
+    },
+    "app.services.openalex": {
+      "killed": 183,
+      "survived": 9
+    },
+    "app.services.pdf": {
+      "killed": 833
+    }
+  },
+  "survivors": [
+    "app.routers.papers.x__merge_llm_metadata__mutmut_14",
+    "app.routers.papers.x__merge_llm_metadata__mutmut_7",
+    "app.services.arxiv.x__cooldown_error__mutmut_6",
+    "app.services.arxiv.x_parse_entry__mutmut_49",
+    "app.services.arxiv.x_parse_entry__mutmut_88",
+    "app.services.llm.x__describe__mutmut_11",
+    "app.services.llm.x__describe__mutmut_12",
+    "app.services.llm.x__describe__mutmut_13",
+    "app.services.llm.x__plausible__mutmut_4",
+    "app.services.llm.x__plausible__mutmut_5",
+    "app.services.llm.x__plausible__mutmut_6",
+    "app.services.llm.x__stream_api__mutmut_59",
+    "app.services.llm.x_credentials_available__mutmut_11",
+    "app.services.openalex.x_parse_work__mutmut_20",
+    "app.services.openalex.x_parse_work__mutmut_90",
+    "app.services.openalex.x_parse_work__mutmut_91",
+    "app.services.openalex.x_parse_work__mutmut_92",
+    "app.services.openalex.x_search__mutmut_31",
+    "app.services.openalex.x_search__mutmut_32",
+    "app.services.openalex.x_search__mutmut_33",
+    "app.services.openalex.x_search__mutmut_34",
+    "app.services.openalex.x_search__mutmut_35"
+  ]
+}

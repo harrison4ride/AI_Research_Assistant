@@ -1,0 +1,13 @@
+diff --git a/frontend/src/components/ChatPanel.tsx b/frontend/src/components/ChatPanel.tsx
+index 7b6360d..86013c2 100644
+--- a/frontend/src/components/ChatPanel.tsx
++++ b/frontend/src/components/ChatPanel.tsx
+@@ -63,7 +63,7 @@ function ChatPanel({ paperId, llm, model }: Props) {
+     )
+     setPending(null)
+     // On failure, give the question back so the user can retry or edit it.
+-    if (!ok) setInput((current) => current || q)
++    if (ok) setInput((current) => current || q)
+   }
+ 
+   function onSubmit(e: FormEvent) {

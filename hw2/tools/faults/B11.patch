@@ -1,0 +1,13 @@
+diff --git a/backend/app/routers/search.py b/backend/app/routers/search.py
+index d3049b6..dec2bf5 100644
+--- a/backend/app/routers/search.py
++++ b/backend/app/routers/search.py
+@@ -31,7 +31,7 @@ async def search(
+     if not query:
+         raise HTTPException(422, "Search query must not be blank.")
+     # Case matters: OpenAlex treats uppercase AND/OR/NOT as operators.
+-    key = (source, " ".join(query.split()), page, per_page)
++    key = (" ".join(query.split()), page, per_page)
+     now = time.monotonic()
+     if (hit := _cache.get(key)) and hit[0] > now:
+         _cache.move_to_end(key)

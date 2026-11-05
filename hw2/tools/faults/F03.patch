@@ -1,0 +1,13 @@
+diff --git a/frontend/src/router.ts b/frontend/src/router.ts
+index f29a24d..6d057b9 100644
+--- a/frontend/src/router.ts
++++ b/frontend/src/router.ts
+@@ -8,7 +8,7 @@ export type Route =
+   | { name: 'paper'; id: number }
+ 
+ export function parseHash(hash: string): Route {
+-  const path = hash.replace(/^#/, '').replace(/\/+$/, '')
++  const path = hash.replace(/^#/, '')
+   const paper = path.match(/^\/paper\/(\d+)$/)
+   if (paper) return { name: 'paper', id: Number(paper[1]) }
+   if (path === '/library') return { name: 'library' }

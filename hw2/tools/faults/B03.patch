@@ -1,0 +1,13 @@
+diff --git a/backend/app/services/arxiv.py b/backend/app/services/arxiv.py
+index d0bed1a..b8468b3 100644
+--- a/backend/app/services/arxiv.py
++++ b/backend/app/services/arxiv.py
+@@ -157,8 +157,6 @@ async def _query(params: dict) -> ET.Element:
+         root = ET.fromstring(resp.content)
+     except ET.ParseError as exc:
+         raise UpstreamError("arXiv returned malformed XML.") from exc
+-    if error := _api_error(root):
+-        raise UpstreamError(f"arXiv rejected the query: {error}", 400)
+     return root
+ 
+ 

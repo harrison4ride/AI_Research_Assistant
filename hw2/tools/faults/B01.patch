@@ -1,0 +1,13 @@
+diff --git a/backend/app/services/openalex.py b/backend/app/services/openalex.py
+index 3995d36..20f0291 100644
+--- a/backend/app/services/openalex.py
++++ b/backend/app/services/openalex.py
+@@ -19,7 +19,7 @@ FIELDS = ",".join([
+ ])
+ 
+ # Only real tags (letter right after "<"), so text like "p < 0.05, n > 30" survives.
+-_TAG_RE = re.compile(r"</?[A-Za-z][\w:.-]*(?:\s[^<>]*)?/?>")
++_TAG_RE = re.compile(r"<[^>]+>")
+ 
+ 
+ def _clean(text: str | None) -> str | None:

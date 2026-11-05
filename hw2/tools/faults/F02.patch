@@ -1,0 +1,13 @@
+diff --git a/frontend/src/api.ts b/frontend/src/api.ts
+index 966dd6d..9b6c4a6 100644
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -30,7 +30,7 @@ export function errorMessage(err: unknown): string {
+ // {loc, msg} objects for request-validation (422) errors.
+ function describeDetail(detail: unknown): string | null {
+   if (typeof detail === 'string') return detail
+-  if (Array.isArray(detail)) {
++  if (Array.isArray(detail) && detail.length > 1) {
+     const msgs = detail
+       .map((d) => {
+         if (typeof d?.msg !== 'string') return null

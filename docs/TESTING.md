@@ -71,6 +71,8 @@ The end-to-end suite is not measured for coverage.
 
 ## Known Bugs
 
+### Bugs With an Expected-Failure Test
+
 Nine tests check behavior that the app gets wrong today. Each is marked as an expected
 failure, so the suite stays green, and each may fail only at the one check its bug
 breaks. A failure anywhere else in such a test (a setup step, a request no test
@@ -113,6 +115,33 @@ check them by hand after a fix:
 - The ftp and 300-page tests expect particular words in the fixed message ("http" and
   "cut off"), so a correct fix worded differently still reports the bug as present.
 
+### Tests That Assert a Known Bug
+
+Three tests expect behavior that is wrong. They pass today and will fail once the bug is
+fixed; then change them to expect the correct behavior.
+
+| Bug | Tests that assert it |
+|-----|----------------------|
+| When arXiv rejects a query without giving a reason, the message reads "arXiv rejected the query: arXiv rejected the query." | `backend/tests/test_search.py::test_arxiv_rejection_without_a_reason_is_reported` |
+| The library card's "PDF ↗" links the open-access PDF even when the library stores a copy, so after a failed download and "Attach PDF" it still links the URL that failed | `frontend/src/components/PaperCard.test.tsx`: "links the open-access PDF when the paper has one, even with a stored copy, and else the stored copy"; `frontend/src/pages/LibraryPage.test.tsx`: "links the open-access PDF when there is one, and else the stored copy" |
+
+### Bugs No Test Covers Yet
+
+The HW2 evaluation also confirmed these bugs, by reproducing them or reading the code;
+no test checks them. Reviewers reported five more with probes of their own
+([hw2/evidence/03-round2/evaluation.md](../hw2/evidence/03-round2/evaluation.md)).
+
+- Author names with lowercase particles, such as "Laurens van der Maaten", are dropped
+  from the authors read from the PDF's layout.
+- An arXiv `Retry-After` header given as a date is ignored, so the app pauses for 60 s
+  instead of the longer pause the date asks for (at most 10 minutes). The date case in
+  `test_arxiv_pause_lasts_one_to_ten_minutes_and_then_arxiv_is_asked_again` uses a date
+  that has already passed, for which 60 s is right either way.
+- After "Save to library" in the reader, the Details tab shows the first-opened time as
+  the saved time until the page is reloaded.
+- After a failed "Clear conversation", the error stays on screen even after later
+  actions succeed.
+
 ## How the Tests Are Isolated
 
 **Backend.** `backend/tests/conftest.py` sets every setting itself and never reads
@@ -144,4 +173,5 @@ Claude Code generated these tests for HW2. One fresh-context agent wrote the ini
 suite (tag `hw2-initial`), and two more agents improved it from feedback (tags
 `hw2-round1` and `hw2-round2`). Application code did not change during this work:
 `backend/app` and `frontend/src` (apart from test files) are the same at these tags as
-at `hw2-baseline`.
+at `hw2-baseline`. [hw2/README.md](../hw2/README.md) describes the experiment, its
+evidence, and how to reproduce its measurements.

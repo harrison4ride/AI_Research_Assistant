@@ -1,0 +1,12 @@
+diff --git a/backend/app/routers/papers.py b/backend/app/routers/papers.py
+index 5591d9f..ba440b9 100644
+--- a/backend/app/routers/papers.py
++++ b/backend/app/routers/papers.py
+@@ -46,7 +46,6 @@ def _matches(paper: Paper, needle: str) -> bool:
+     return (
+         needle in _fold(paper.title)
+         or needle in _fold(paper.abstract or "")
+-        or any(needle in _fold(author) for author in paper.authors or [])
+     )
+ 
+ 

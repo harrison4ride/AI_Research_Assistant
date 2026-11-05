@@ -1,0 +1,12 @@
+diff --git a/frontend/src/api.ts b/frontend/src/api.ts
+index 966dd6d..94bafa7 100644
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -195,7 +195,6 @@ async function streamEvents(
+     buffer = lines.pop() ?? ''
+     for (const line of lines) if (line.trim()) onEvent(JSON.parse(line) as StreamEvent)
+   }
+-  if (buffer.trim()) onEvent(JSON.parse(buffer) as StreamEvent)
+ }
+ 
+ export function streamSummary(

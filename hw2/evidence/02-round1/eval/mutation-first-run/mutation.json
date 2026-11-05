@@ -1,0 +1,70 @@
+{
+  "rc": 0,
+  "seconds": 409,
+  "modules": [
+    "app/services/arxiv.py",
+    "app/services/openalex.py",
+    "app/services/pdf.py",
+    "app/services/fulltext.py",
+    "app/services/cache.py",
+    "app/services/llm.py",
+    "app/routers/search.py",
+    "app/routers/papers.py",
+    "app/routers/assistant.py"
+  ],
+  "counts": {
+    "killed": 2233,
+    "segfault": 540,
+    "survived": 9,
+    "timeout": 5
+  },
+  "mutants": 2787,
+  "killed": 2233,
+  "score_all": 80.1,
+  "score_covered": 99.4,
+  "by_module": {
+    "app.routers.assistant": {
+      "killed": 146
+    },
+    "app.routers.papers": {
+      "killed": 251,
+      "segfault": 2
+    },
+    "app.services.arxiv": {
+      "killed": 46,
+      "segfault": 330
+    },
+    "app.services.cache": {
+      "killed": 42
+    },
+    "app.services.fulltext": {
+      "killed": 226,
+      "segfault": 26
+    },
+    "app.services.llm": {
+      "killed": 678,
+      "survived": 9,
+      "segfault": 1,
+      "timeout": 5
+    },
+    "app.services.openalex": {
+      "killed": 17,
+      "segfault": 175
+    },
+    "app.services.pdf": {
+      "killed": 827,
+      "segfault": 6
+    }
+  },
+  "survivors": [
+    "app.services.llm.x__describe__mutmut_11",
+    "app.services.llm.x__describe__mutmut_12",
+    "app.services.llm.x__describe__mutmut_13",
+    "app.services.llm.x__extract_api__mutmut_45",
+    "app.services.llm.x__plausible__mutmut_4",
+    "app.services.llm.x__plausible__mutmut_5",
+    "app.services.llm.x__plausible__mutmut_6",
+    "app.services.llm.x_credentials_available__mutmut_11",
+    "app.services.llm.x_credentials_available__mutmut_18"
+  ]
+}

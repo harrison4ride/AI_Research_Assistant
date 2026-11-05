@@ -296,7 +296,8 @@ Interactive API docs are at <http://localhost:8000/docs> while the backend runs.
   once with a message, and uploads skip the arXiv metadata lookup. Repeated searches
   within 10 minutes reuse earlier results.
 - Some known bugs are not fixed yet. [docs/TESTING.md § Known Bugs](docs/TESTING.md#known-bugs)
-  lists them; each has a test that will start failing on purpose once it is fixed.
+  lists them and, where a test touches a bug, the test to update when the bug is
+  fixed.
 
 ## Development Process
 
@@ -314,4 +315,5 @@ For HW2, Claude Code generated the automated tests. A fresh-context agent wrote 
 initial suite (tag `hw2-initial`), and two more agents improved it from review,
 coverage, and mutation-testing feedback (tags `hw2-round1` and `hw2-round2`). The
 application code did not change during that work; it is the code at tag
-`hw2-baseline`.
+`hw2-baseline`. [hw2/](hw2/README.md) holds the prompts, the agents' reports, the
+reviews, the measurements, and the tools to reproduce them.

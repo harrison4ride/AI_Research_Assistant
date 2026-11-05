@@ -1,0 +1,793 @@
+{
+  "backend": {
+    "counts": {
+      "failed": 0,
+      "passed": 553,
+      "skipped": 0,
+      "total": 558,
+      "xfail": 5
+    },
+    "coverage": {
+      "branch_pct": 95.7,
+      "branches": 506,
+      "covered": 1825,
+      "covered_branches": 484,
+      "files": {
+        "app/__init__.py": {
+          "branch_pct": null,
+          "branches": 0,
+          "covered": 0,
+          "covered_branches": 0,
+          "line_pct": 100.0,
+          "statements": 0
+        },
+        "app/config.py": {
+          "branch_pct": 50.0,
+          "branches": 2,
+          "covered": 42,
+          "covered_branches": 1,
+          "line_pct": 97.7,
+          "statements": 43
+        },
+        "app/db.py": {
+          "branch_pct": 100.0,
+          "branches": 8,
+          "covered": 39,
+          "covered_branches": 8,
+          "line_pct": 100.0,
+          "statements": 39
+        },
+        "app/main.py": {
+          "branch_pct": 100.0,
+          "branches": 6,
+          "covered": 57,
+          "covered_branches": 6,
+          "line_pct": 100.0,
+          "statements": 57
+        },
+        "app/models.py": {
+          "branch_pct": 100.0,
+          "branches": 2,
+          "covered": 60,
+          "covered_branches": 2,
+          "line_pct": 100.0,
+          "statements": 60
+        },
+        "app/routers/__init__.py": {
+          "branch_pct": null,
+          "branches": 0,
+          "covered": 0,
+          "covered_branches": 0,
+          "line_pct": 100.0,
+          "statements": 0
+        },
+        "app/routers/assistant.py": {
+          "branch_pct": 92.9,
+          "branches": 28,
+          "covered": 141,
+          "covered_branches": 26,
+          "line_pct": 95.9,
+          "statements": 147
+        },
+        "app/routers/papers.py": {
+          "branch_pct": 93.2,
+          "branches": 74,
+          "covered": 234,
+          "covered_branches": 69,
+          "line_pct": 96.3,
+          "statements": 243
+        },
+        "app/routers/search.py": {
+          "branch_pct": 100.0,
+          "branches": 6,
+          "covered": 31,
+          "covered_branches": 6,
+          "line_pct": 100.0,
+          "statements": 31
+        },
+        "app/schemas.py": {
+          "branch_pct": 100.0,
+          "branches": 4,
+          "covered": 99,
+          "covered_branches": 4,
+          "line_pct": 100.0,
+          "statements": 99
+        },
+        "app/services/__init__.py": {
+          "branch_pct": null,
+          "branches": 0,
+          "covered": 0,
+          "covered_branches": 0,
+          "line_pct": 100.0,
+          "statements": 0
+        },
+        "app/services/arxiv.py": {
+          "branch_pct": 96.9,
+          "branches": 32,
+          "covered": 100,
+          "covered_branches": 31,
+          "line_pct": 99.0,
+          "statements": 101
+        },
+        "app/services/cache.py": {
+          "branch_pct": 100.0,
+          "branches": 6,
+          "covered": 23,
+          "covered_branches": 6,
+          "line_pct": 100.0,
+          "statements": 23
+        },
+        "app/services/claude_code.py": {
+          "branch_pct": 95.7,
+          "branches": 70,
+          "covered": 231,
+          "covered_branches": 67,
+          "line_pct": 98.3,
+          "statements": 235
+        },
+        "app/services/fulltext.py": {
+          "branch_pct": 94.4,
+          "branches": 36,
+          "covered": 148,
+          "covered_branches": 34,
+          "line_pct": 100.0,
+          "statements": 148
+        },
+        "app/services/http.py": {
+          "branch_pct": 100.0,
+          "branches": 4,
+          "covered": 15,
+          "covered_branches": 4,
+          "line_pct": 100.0,
+          "statements": 15
+        },
+        "app/services/llm.py": {
+          "branch_pct": 99.0,
+          "branches": 100,
+          "covered": 275,
+          "covered_branches": 99,
+          "line_pct": 99.3,
+          "statements": 277
+        },
+        "app/services/openalex.py": {
+          "branch_pct": 100.0,
+          "branches": 12,
+          "covered": 50,
+          "covered_branches": 12,
+          "line_pct": 100.0,
+          "statements": 50
+        },
+        "app/services/pdf.py": {
+          "branch_pct": 94.0,
+          "branches": 116,
+          "covered": 280,
+          "covered_branches": 109,
+          "line_pct": 99.3,
+          "statements": 282
+        }
+      },
+      "line_pct": 98.6,
+      "statements": 1850
+    },
+    "failed": {},
+    "llm_stub_calls": 0,
+    "present": true,
+    "run": {
+      "rc": 0,
+      "seconds": 24.3,
+      "timed_out": false
+    },
+    "wrote_default_data_dir": false,
+    "xfail": {
+      "tests.test_fulltext::test_a_link_that_is_not_http_is_refused_with_a_true_reason": "Confirmed app bug: fulltext._check_public raises UnsafeUrl for any non-http(s) link, and ensure_full_text reports every UnsafeUrl as 'points to a local or private address', which is false for an ftp:// link to a public host.",
+      "tests.test_fulltext::test_a_malformed_pdf_link_is_recorded_and_the_abstract_is_used": "Confirmed app bug: a malformed link makes urlsplit() raise ValueError in fulltext._check_public, which ensure_full_text does not catch, so /fulltext and /summary answer 500 instead of recording the failure and falling back to the abstract (ensure_full_text docstring: expected failures are recorded '",
+      "tests.test_llm_service::test_an_empty_answer_cut_off_at_the_length_limit_is_an_error": "Confirmed app bug: both providers append the cut-off note before the empty-answer check (llm._stream_claude_code and llm._stream_api), so an answer with no text that stopped at the length limit is saved as just the note instead of being reported as an empty answer.",
+      "tests.test_summary::test_a_pdf_longer_than_the_page_limit_is_reported_as_cut_off": "Confirmed app bug: pdf.extract reads only the first MAX_PDF_PAGES_FOR_TEXT pages, but build_context is given page_count of the whole PDF and truncated=False, so neither the model nor the UI is told that the text was cut off (README: the prompt tells the model when a long paper is cut off, and the Su",
+      "tests.test_upload::test_a_real_title_in_pdf_properties_is_kept_whatever_word_it_starts_with": "Confirmed app bug: JUNK_META_TITLE in app/services/pdf.py has no end anchor after the placeholder words, so any real title that merely starts with Main, Paper, Document, or arXiv is discarded as a placeholder."
+    }
+  },
+  "commit": "379d0cbb1c2e5d4f74294d1a8ce1060a5e8cbac5",
+  "e2e": {
+    "flaky": [],
+    "runs": [
+      {
+        "failed": 0,
+        "failed_tests": [],
+        "passed": 15,
+        "run": 1,
+        "seconds": 19.6,
+        "skipped": 0
+      },
+      {
+        "failed": 0,
+        "failed_tests": [],
+        "passed": 15,
+        "run": 2,
+        "seconds": 17.2,
+        "skipped": 0
+      },
+      {
+        "failed": 0,
+        "failed_tests": [],
+        "passed": 15,
+        "run": 3,
+        "seconds": 16.8,
+        "skipped": 0
+      },
+      {
+        "failed": 0,
+        "failed_tests": [],
+        "passed": 15,
+        "run": 4,
+        "seconds": 16.8,
+        "skipped": 0
+      }
+    ],
+    "tests": 15
+  },
+  "faults": {
+    "detected": 17,
+    "detected_backend": 12,
+    "detected_frontend": 5,
+    "detected_history": 7,
+    "results": {
+      "B01": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_search::test_openalex_markup_is_removed_but_comparisons_are_kept"
+        ],
+        "seconds": 15.5,
+        "timed_out": false
+      },
+      "B02": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_search::test_arxiv_query_builder",
+          "tests.test_search::test_arxiv_query_keeps_exact_phrase_and_drops_stopwords"
+        ],
+        "seconds": 15.5,
+        "timed_out": false
+      },
+      "B03": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_search::test_arxiv_rejected_query_is_reported",
+          "tests.test_search::test_arxiv_rejection_without_a_reason_is_reported"
+        ],
+        "seconds": 14.8,
+        "timed_out": false
+      },
+      "B04": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_library::test_doi_match_ignores_case[10.18653/V1/N19-1423-10.18653/v1/n19-1423]",
+          "tests.test_library::test_doi_match_ignores_case[10.18653/v1/n19-1423-10.18653/V1/N19-1423]",
+          "tests.test_library::test_openalex_copy_of_an_arxiv_paper_matches_a_later_arxiv_save",
+          "tests.test_library::test_same_paper_from_arxiv_and_openalex_is_saved_once"
+        ],
+        "seconds": 15.1,
+        "timed_out": false
+      },
+      "B05": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_library::test_clearing_authors_with_null_keeps_the_library_working"
+        ],
+        "seconds": 15.0,
+        "timed_out": false
+      },
+      "B06": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_library::test_filter_matches_title_author_and_abstract[devlin-expected2]",
+          "tests.test_library::test_filter_matches_title_author_and_abstract[m\\xfcller-expected4]"
+        ],
+        "seconds": 15.7,
+        "timed_out": false
+      },
+      "B07": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_chat::test_a_failed_turn_is_left_out_of_later_history",
+          "tests.test_chat::test_answer_is_streamed_and_both_turns_are_saved",
+          "tests.test_chat::test_claude_code_error_keeps_the_conversation_unchanged",
+          "tests.test_chat::test_clear_conversation",
+          "tests.test_chat::test_conversations_are_kept_per_paper",
+          "tests.test_chat::test_failed_answer_saves_nothing",
+          "tests.test_chat::test_follow_up_question_through_claude_code",
+          "tests.test_chat::test_follow_up_questions_include_the_conversation_so_far",
+          "tests.test_chat::test_history_can_be_turned_off",
+          "tests.test_chat::test_history_never_starts_with_an_answer",
+          "tests.test_chat::test_invalid_questions_are_rejected[body0-question]",
+          "tests.test_chat::test_invalid_questions_are_rejected[body1-question]",
+          "tests.test_chat::test_invalid_questions_are_rejected[body2-question]",
+          "tests.test_chat::test_invalid_questions_are_rejected[body3-question]",
+          "tests.test_chat::test_invalid_questions_are_rejected[body4-model]",
+          "tests.test_chat::test_longest_allowed_question_is_answered_and_saved",
+          "tests.test_chat::test_only_recent_turns_are_sent",
+          "tests.test_chat::test_paper_deleted_while_the_answer_was_written",
+          "tests.test_chat::test_question_is_answered_from_the_paper",
+          "tests.test_chat::test_question_whitespace_is_trimmed",
+          "tests.test_chat::test_question_with_a_model_from_the_menu",
+          "tests.test_chat::test_question_with_an_unknown_model_is_rejected",
+          "tests.test_fulltext::test_a_link_with_a_port_is_downloaded_from_that_port",
+          "tests.test_fulltext::test_a_paper_deleted_just_before_its_pdf_is_saved_is_404_and_nothing_is_stored",
+          "tests.test_fulltext::test_a_pdf_after_exactly_5_redirects_is_downloaded",
+          "tests.test_fulltext::test_a_pdf_exactly_as_large_as_the_limit_is_kept_byte_for_byte[at once]",
+          "tests.test_fulltext::test_a_pdf_exactly_as_large_as_the_limit_is_kept_byte_for_byte[in pieces]",
+          "tests.test_fulltext::test_a_plain_http_link_to_a_public_host_is_downloaded",
+          "tests.test_fulltext::test_a_relative_redirect_is_followed_on_the_same_host",
+          "tests.test_fulltext::test_download_failures_are_recorded_with_the_reason[<lambda>-No text could be extracted. The PDF may be a scanned image.]",
+          "tests.test_fulltext::test_download_open_access_pdf",
+          "tests.test_fulltext::test_failed_download_is_not_repeated_unless_retried",
+          "tests.test_fulltext::test_one_download_per_paper_at_a_time",
+          "tests.test_fulltext::test_redirect_to_another_public_host_is_followed",
+          "tests.test_fulltext::test_successful_download_is_not_repeated",
+          "tests.test_library::test_a_paper_whose_stored_pdf_is_already_gone_can_be_deleted",
+          "tests.test_library::test_a_pdf_shared_by_two_entries_is_kept_until_both_are_deleted",
+          "tests.test_library::test_deleting_a_paper_removes_its_stored_pdf",
+          "tests.test_library::test_saving_an_opened_paper_keeps_its_summary_section_summaries_and_conversation[reader]",
+          "tests.test_library::test_saving_an_opened_paper_keeps_its_summary_section_summaries_and_conversation[search page]",
+          "tests.test_outline::test_a_reply_that_skips_a_section_is_not_saved",
+          "tests.test_outline::test_an_outline_read_from_a_pdf_that_was_replaced_meanwhile_is_not_kept",
+          "tests.test_outline::test_attaching_a_new_pdf_resets_the_outline",
+          "tests.test_outline::test_model_failure_while_summarizing_sections",
+          "tests.test_outline::test_outline_lists_the_sections_of_the_pdf_where_they_are",
+          "tests.test_outline::test_outline_of_a_stored_pdf_that_can_no_longer_be_read",
+          "tests.test_outline::test_outline_prefers_the_pdf_bookmarks",
+          "tests.test_outline::test_section_headings_are_passed_to_the_model_as_data",
+          "tests.test_outline::test_section_summaries_are_dropped_if_the_paper_was_deleted_meanwhile",
+          "tests.test_outline::test_section_summaries_are_dropped_if_the_pdf_was_replaced_meanwhile",
+          "tests.test_outline::test_section_summaries_are_written_and_saved",
+          "tests.test_outline::test_section_summaries_through_claude_code",
+          "tests.test_outline::test_section_summaries_with_unknown_model",
+          "tests.test_outline::test_the_outline_of_a_search_result_downloads_its_pdf_first",
+          "tests.test_outline::test_without_headings_the_model_names_the_sections_and_they_are_located",
+          "tests.test_summary::test_a_refused_or_empty_summary_from_claude_code_keeps_the_previous_one[empty-The model returned an empty answer. Try again.]",
+          "tests.test_summary::test_a_refused_or_empty_summary_from_claude_code_keeps_the_previous_one[refusal-The model declined to answer this request.]",
+          "tests.test_summary::test_a_summary_cut_off_by_claude_code_is_kept_with_a_note",
+          "tests.test_summary::test_claude_code_failure_is_shown_to_the_user",
+          "tests.test_summary::test_failed_summary_is_reported_and_keeps_the_previous_one",
+          "tests.test_summary::test_paper_deleted_while_the_summary_was_written",
+          "tests.test_summary::test_regenerating_replaces_the_summary",
+          "tests.test_summary::test_restarted_answer_discards_the_earlier_text",
+          "tests.test_summary::test_summary_and_answers_through_the_anthropic_api",
+          "tests.test_summary::test_summary_downloads_the_open_access_pdf_first",
+          "tests.test_summary::test_summary_is_based_on_the_full_text_of_the_paper",
+          "tests.test_summary::test_summary_is_streamed_and_saved",
+          "tests.test_summary::test_summary_through_claude_code",
+          "tests.test_summary::test_summary_when_claude_code_is_not_installed",
+          "tests.test_summary::test_summary_with_a_model_from_the_menu",
+          "tests.test_summary::test_summary_with_an_unknown_model_is_rejected_before_calling_the_llm",
+          "tests.test_summary::test_unexpected_failure_is_reported_in_the_stream_without_details",
+          "tests.test_summary::test_very_long_paper_is_cut_off_and_the_client_is_told",
+          "tests.test_upload::test_a_real_title_in_pdf_properties_is_kept",
+          "tests.test_upload::test_a_refused_attachment_leaves_the_paper_unchanged[data1-422-The file could not be read as a PDF.]",
+          "tests.test_upload::test_a_refused_attachment_leaves_the_paper_unchanged[data2-422-The PDF is password-protected.]",
+          "tests.test_upload::test_a_refused_attachment_leaves_the_paper_unchanged[data3-422-No text could be extracted. The PDF may be a scanned image.]",
+          "tests.test_upload::test_an_arxiv_id_that_arxiv_does_not_know_falls_back_to_the_model",
+          "tests.test_upload::test_arxiv_id_of_a_cited_paper_is_not_trusted",
+          "tests.test_upload::test_arxiv_pdf_gets_its_metadata_from_arxiv",
+          "tests.test_upload::test_attach_pdf_to_a_saved_search_result",
+          "tests.test_upload::test_attaching_another_pdf_replaces_the_old_file",
+          "tests.test_upload::test_attaching_to_a_paper_deleted_meanwhile_is_404_and_keeps_no_file",
+          "tests.test_upload::test_file_exactly_at_the_size_limit_is_accepted",
+          "tests.test_upload::test_llm_fields_that_are_empty_or_short_keep_the_heuristic_values",
+          "tests.test_upload::test_llm_metadata_is_ignored_when_its_title_is_not_in_the_pdf",
+          "tests.test_upload::test_llm_metadata_wins_when_its_title_is_on_the_page",
+          "tests.test_upload::test_pdf_metadata_title_and_authors_are_used",
+          "tests.test_upload::test_pdf_whose_stored_file_is_gone_is_404",
+          "tests.test_upload::test_placeholder_title_in_pdf_properties_is_ignored[Document1]",
+          "tests.test_upload::test_placeholder_title_in_pdf_properties_is_ignored[Microsoft Word - draft3.docx]",
+          "tests.test_upload::test_placeholder_title_in_pdf_properties_is_ignored[arXiv]",
+          "tests.test_upload::test_placeholder_title_in_pdf_properties_is_ignored[main.pdf]",
+          "tests.test_upload::test_placeholder_title_in_pdf_properties_is_ignored[main]",
+          "tests.test_upload::test_placeholder_title_in_pdf_properties_is_ignored[paper.tex]",
+          "tests.test_upload::test_placeholder_title_in_pdf_properties_is_ignored[paper]",
+          "tests.test_upload::test_placeholder_title_in_pdf_properties_is_ignored[untitled]",
+          "tests.test_upload::test_title_falls_back_to_the_file_name",
+          "tests.test_upload::test_unreadable_pdfs_are_rejected_with_the_reason[data0-The file could not be read as a PDF.]",
+          "tests.test_upload::test_unreadable_pdfs_are_rejected_with_the_reason[data1-The PDF is password-protected.]",
+          "tests.test_upload::test_unreadable_pdfs_are_rejected_with_the_reason[data2-The PDF has no pages.]",
+          "tests.test_upload::test_unreadable_pdfs_are_rejected_with_the_reason[data3-No text could be extracted. The PDF may be a scanned image.]",
+          "tests.test_upload::test_upload_asks_the_llm_with_the_text_of_the_first_pages_only",
+          "tests.test_upload::test_upload_during_an_arxiv_pause_skips_the_lookup",
+          "tests.test_upload::test_upload_extracts_metadata_from_the_pdf_layout",
+          "tests.test_upload::test_upload_still_works_when_arxiv_is_unavailable",
+          "tests.test_upload::test_uploaded_pdf_is_stored_and_served_back",
+          "tests.test_upload::test_uploading_the_same_file_twice_returns_the_existing_entry"
+        ],
+        "seconds": 13.0,
+        "timed_out": false
+      },
+      "B08": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_chat::test_follow_up_question_through_claude_code",
+          "tests.test_chat::test_follow_up_questions_include_the_conversation_so_far",
+          "tests.test_chat::test_history_never_starts_with_an_answer",
+          "tests.test_chat::test_only_recent_turns_are_sent"
+        ],
+        "seconds": 15.0,
+        "timed_out": false
+      },
+      "B09": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_chat::test_answer_is_streamed_and_both_turns_are_saved",
+          "tests.test_chat::test_question_is_answered_from_the_paper",
+          "tests.test_library::test_saving_an_opened_paper_keeps_its_summary_section_summaries_and_conversation[reader]",
+          "tests.test_library::test_saving_an_opened_paper_keeps_its_summary_section_summaries_and_conversation[search page]",
+          "tests.test_llm_service::test_a_paper_exactly_as_long_as_the_limit_is_not_cut_off",
+          "tests.test_llm_service::test_context_cuts_off_long_papers",
+          "tests.test_llm_service::test_context_with_full_text",
+          "tests.test_outline::test_a_reply_that_skips_a_section_is_not_saved",
+          "tests.test_outline::test_model_failure_while_summarizing_sections",
+          "tests.test_outline::test_section_headings_are_passed_to_the_model_as_data",
+          "tests.test_outline::test_section_summaries_are_dropped_if_the_paper_was_deleted_meanwhile",
+          "tests.test_outline::test_section_summaries_are_dropped_if_the_pdf_was_replaced_meanwhile",
+          "tests.test_outline::test_section_summaries_are_written_and_saved",
+          "tests.test_outline::test_section_summaries_through_claude_code",
+          "tests.test_summary::test_summary_and_answers_through_the_anthropic_api",
+          "tests.test_summary::test_summary_downloads_the_open_access_pdf_first",
+          "tests.test_summary::test_summary_is_based_on_the_full_text_of_the_paper",
+          "tests.test_summary::test_summary_is_streamed_and_saved",
+          "tests.test_summary::test_summary_through_claude_code",
+          "tests.test_summary::test_very_long_paper_is_cut_off_and_the_client_is_told"
+        ],
+        "seconds": 15.9,
+        "timed_out": false
+      },
+      "B10": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_library::test_a_paper_saved_or_reopened_while_pruning_runs_is_kept[saved]",
+          "tests.test_library::test_an_older_database_is_upgraded_and_keeps_its_papers",
+          "tests.test_library::test_pruning_keeps_a_pdf_that_another_paper_still_uses",
+          "tests.test_library::test_unsaved_papers_not_opened_for_a_week_are_deleted"
+        ],
+        "seconds": 15.3,
+        "timed_out": false
+      },
+      "B11": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_search::test_cache_separates_pages_page_sizes_and_sources"
+        ],
+        "seconds": 15.3,
+        "timed_out": false
+      },
+      "B12": {
+        "detected": true,
+        "detected_by": [
+          "tests.test_library::test_open_without_saving",
+          "tests.test_library::test_unsaved_papers_are_not_listed_or_found_by_the_filter"
+        ],
+        "seconds": 15.9,
+        "timed_out": false
+      },
+      "F01": {
+        "detected": true,
+        "detected_by": [
+          "src/router.test.ts::paperKey > falls back to the URL, then the DOI, then the title"
+        ],
+        "seconds": 8.9,
+        "timed_out": false
+      },
+      "F02": {
+        "detected": false,
+        "detected_by": [],
+        "seconds": 7.3,
+        "timed_out": false
+      },
+      "F03": {
+        "detected": true,
+        "detected_by": [
+          "src/App.test.tsx::App > opens the page in the address bar, and tidies its address",
+          "src/router.test.ts::parseHash > #/library/",
+          "src/router.test.ts::parseHash > #/paper/12//"
+        ],
+        "seconds": 6.9,
+        "timed_out": false
+      },
+      "F04": {
+        "detected": true,
+        "detected_by": [
+          "src/api.test.ts::streamed answers > delivers every event, also when one is split across network chunks"
+        ],
+        "seconds": 7.1,
+        "timed_out": false
+      },
+      "F05": {
+        "detected": true,
+        "detected_by": [
+          "src/components/SummaryPanel.test.tsx::SummaryPanel > discards text from a model that was replaced mid-answer"
+        ],
+        "seconds": 7.7,
+        "timed_out": false
+      },
+      "F06": {
+        "detected": true,
+        "detected_by": [
+          "src/components/ChatPanel.test.tsx::ChatPanel > asks a typed question with Enter and streams the answer as it arrives",
+          "src/components/ChatPanel.test.tsx::ChatPanel > reports an unreachable backend",
+          "src/components/ChatPanel.test.tsx::ChatPanel > shows a failed answer and gives the question back"
+        ],
+        "seconds": 7.6,
+        "timed_out": false
+      }
+    },
+    "total": 18,
+    "total_backend": 12,
+    "total_frontend": 6,
+    "total_history": 8
+  },
+  "flaky": {
+    "backend": [],
+    "frontend": [],
+    "runs_per_suite": 5
+  },
+  "frontend": {
+    "counts": {
+      "failed": 0,
+      "passed": 190,
+      "skipped": 0,
+      "total": 190,
+      "xfail": 0
+    },
+    "coverage": {
+      "branch_pct": 86.09,
+      "branches": 604,
+      "covered_branches": 520,
+      "covered_lines": 600,
+      "files": {
+        "src/App.tsx": {
+          "branches": 96.15,
+          "functions": 100,
+          "lines": 100,
+          "statements": 95.23
+        },
+        "src/api.ts": {
+          "branches": 80.85,
+          "functions": 100,
+          "lines": 98.5,
+          "statements": 96.2
+        },
+        "src/components/ChatPanel.tsx": {
+          "branches": 94.02,
+          "functions": 89.47,
+          "lines": 91.11,
+          "statements": 90.56
+        },
+        "src/components/EditPaperForm.tsx": {
+          "branches": 85.71,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/components/ErrorBoundary.tsx": {
+          "branches": 100,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/components/FullTextStatus.tsx": {
+          "branches": 90.47,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/components/LlmNotice.tsx": {
+          "branches": 50,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/components/Markdown.tsx": {
+          "branches": 66.66,
+          "functions": 100,
+          "lines": 88.88,
+          "statements": 80
+        },
+        "src/components/ModelSelect.tsx": {
+          "branches": 66.66,
+          "functions": 100,
+          "lines": 100,
+          "statements": 80
+        },
+        "src/components/PaperCard.tsx": {
+          "branches": 100,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/components/PdfViewer.tsx": {
+          "branches": 53.33,
+          "functions": 67.64,
+          "lines": 79.79,
+          "statements": 73.98
+        },
+        "src/components/RichText.tsx": {
+          "branches": 100,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/components/SaveButton.tsx": {
+          "branches": 100,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/components/SectionsPanel.tsx": {
+          "branches": 90.38,
+          "functions": 100,
+          "lines": 100,
+          "statements": 96.96
+        },
+        "src/components/SummaryPanel.tsx": {
+          "branches": 93.75,
+          "functions": 100,
+          "lines": 100,
+          "statements": 88.88
+        },
+        "src/components/UploadBox.tsx": {
+          "branches": 88.88,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/main.tsx": {
+          "branches": 100,
+          "functions": 100,
+          "lines": 0,
+          "statements": 0
+        },
+        "src/pages/LibraryPage.tsx": {
+          "branches": 96.29,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/pages/PaperPage.tsx": {
+          "branches": 82.92,
+          "functions": 87.5,
+          "lines": 92.53,
+          "statements": 89.47
+        },
+        "src/pages/SearchPage.tsx": {
+          "branches": 85.1,
+          "functions": 96.42,
+          "lines": 100,
+          "statements": 95
+        },
+        "src/router.ts": {
+          "branches": 94.44,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/types.ts": {
+          "branches": 100,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/useLlmStream.ts": {
+          "branches": 93.75,
+          "functions": 100,
+          "lines": 100,
+          "statements": 100
+        },
+        "src/useModelChoice.ts": {
+          "branches": 100,
+          "functions": 100,
+          "lines": 90.9,
+          "statements": 91.66
+        }
+      },
+      "function_pct": 92.7,
+      "line_pct": 94.78,
+      "lines": 633,
+      "statement_pct": 91.78
+    },
+    "failed": {},
+    "present": true,
+    "run": {
+      "rc": 0,
+      "seconds": 10.4,
+      "timed_out": false
+    }
+  },
+  "hermetic": {
+    "fail_only_without_network": [],
+    "run": {
+      "rc": 0,
+      "seconds": 16.6,
+      "timed_out": false
+    }
+  },
+  "notes": [
+    "suite does not declare @vitest/coverage-v8; harness installed 5.1.0 for measurement only"
+  ],
+  "parallel": {
+    "failed": 0,
+    "log": "logs/backend-parallel-8.log",
+    "passed": 553,
+    "safe": true,
+    "workers": 8,
+    "xfailed": 5
+  },
+  "ref": "hw2-round2",
+  "setup_backend": {
+    "rc": 0,
+    "seconds": 0.2,
+    "timed_out": false
+  },
+  "setup_frontend": {
+    "rc": 0,
+    "seconds": 1.9,
+    "timed_out": false
+  },
+  "static": {
+    "backend": {
+      "assertions_total": 936,
+      "files": 12,
+      "mean_assertions": 2.59,
+      "no_assertion": [],
+      "per_file": {
+        "backend/tests/test_app.py": 19,
+        "backend/tests/test_chat.py": 23,
+        "backend/tests/test_claude_code_cli.py": 21,
+        "backend/tests/test_fulltext.py": 29,
+        "backend/tests/test_isolation.py": 1,
+        "backend/tests/test_library.py": 57,
+        "backend/tests/test_llm_service.py": 46,
+        "backend/tests/test_outline.py": 18,
+        "backend/tests/test_pdf_extraction.py": 55,
+        "backend/tests/test_search.py": 38,
+        "backend/tests/test_summary.py": 23,
+        "backend/tests/test_upload.py": 31
+      },
+      "status_code_only": [
+        "backend/tests/test_fulltext.py::test_fetch_full_text_of_unknown_paper",
+        "backend/tests/test_upload.py::test_attach_to_unknown_paper",
+        "backend/tests/test_upload.py::test_file_exactly_at_the_size_limit_is_accepted"
+      ],
+      "test_functions": 361
+    },
+    "e2e_files": [
+      "frontend/e2e/reader.spec.ts",
+      "frontend/e2e/search-and-library.spec.ts",
+      "frontend/e2e/upload-summary-chat.spec.ts"
+    ],
+    "frontend": {
+      "assertions_total": 430,
+      "files": 16,
+      "mean_assertions": 2.59,
+      "no_assertion": [
+        "frontend/src/components/UploadBox.test.tsx: \"or drop a paper here\")",
+        "frontend/src/pages/PaperPage.test.tsx: unsaved papers are deleted ${wording} without being opened)"
+      ],
+      "per_file": {
+        "frontend/src/App.test.tsx": 6,
+        "frontend/src/api.test.ts": 18,
+        "frontend/src/components/ChatPanel.test.tsx": 16,
+        "frontend/src/components/EditPaperForm.test.tsx": 7,
+        "frontend/src/components/FullTextStatus.test.tsx": 8,
+        "frontend/src/components/Markdown.test.tsx": 7,
+        "frontend/src/components/PaperCard.test.tsx": 9,
+        "frontend/src/components/PdfViewer.test.tsx": 4,
+        "frontend/src/components/SectionsPanel.test.tsx": 11,
+        "frontend/src/components/SummaryPanel.test.tsx": 11,
+        "frontend/src/components/UploadBox.test.tsx": 10,
+        "frontend/src/pages/LibraryPage.test.tsx": 13,
+        "frontend/src/pages/PaperPage.test.tsx": 22,
+        "frontend/src/pages/SearchPage.test.tsx": 19,
+        "frontend/src/router.test.ts": 3,
+        "frontend/src/useLlmStream.test.ts": 2
+      },
+      "test_blocks": 166
+    }
+  }
+}

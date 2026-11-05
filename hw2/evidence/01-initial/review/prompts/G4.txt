@@ -1,0 +1,32 @@
+You are reviewing part of an automated test suite for correctness. Repository: /Users/hongxiangzhang/Documents/593-demo/AI_Research_Assistant (FastAPI backend in backend/, React + TypeScript frontend in frontend/). Work only inside this directory. This is a READ-ONLY review: do not create, edit, or delete any file, and do not commit. You may run tests (for example `cd frontend && npx vitest run src/api.test.ts`); do not start servers on ports 8000 or 5173.
+
+Files to review (every test in them):
+- frontend/src/api.test.ts
+- frontend/src/router.test.ts
+- frontend/src/App.test.tsx
+- frontend/src/pages/SearchPage.test.tsx
+- frontend/src/pages/LibraryPage.test.tsx
+- frontend/src/pages/PaperPage.test.tsx
+plus the helpers they use (frontend/src/test/setup.ts, frontend/src/test/fetchMock.ts, frontend/src/test/fixtures.ts, frontend/vitest.config.ts).
+
+The oracle is the app's INTENDED behavior, never its current output:
+1. Requirements F1-F5 and acceptance criteria in docs/REQUIREMENTS.md
+2. Behavior documented for users in README.md and INSTALL.md, and UI text
+3. Intent stated in code comments and docstrings in frontend/src and backend/app (the frontend talks to the backend API described in README.md's API reference)
+A test that passes is not necessarily correct: a test can pass because it asserts buggy current behavior, or because it checks its own mock instead of the app.
+
+Give each test exactly one primary category:
+- OK: checks intended behavior with correct inputs and expected values, and its assertion would fail if that behavior broke.
+- WEAK: checks the right behavior, but the assertion would still pass under a plausible bug (only that something rendered; a mock was called but its arguments are unchecked; a value checked so loosely that a wrong value passes).
+- WRONG: the expectation contradicts intended behavior, the inputs make the check meaningless, or the test passes for the wrong reason (asserts on its own mock instead of the app).
+- REDUNDANT: same behavior, same kind of input, and same assertions as another test; adds no detection power. Name the other test.
+- BRITTLE: checks an implementation detail that no requirement or documented behavior needs (for example CSS class names or exact markup), so a correct refactor would break it.
+- FLAKY: outcome depends on network, wall-clock time or timers, test order, or sleeps.
+
+Be strict and concrete. For WEAK, name the plausible bug that would slip through. For WRONG, quote the intended behavior (file and line) that the test contradicts. Do not pad: most tests may well be OK.
+
+Reply with exactly these sections:
+1. Counts: for each file, the number of tests (count `it.each`/`test.each` as one test and state how many cases it expands to), and the number in each category.
+2. Findings: one row per non-OK test, as a Markdown table: `file > test name | category | reason (with line numbers) | how to fix it`.
+3. Missing tests: requirement-level behaviors or error paths in this area that no test exercises (say which requirement or documented behavior each belongs to). Check against the code in frontend/src/api.ts, frontend/src/router.ts, frontend/src/App.tsx, frontend/src/pages/*.tsx, frontend/src/useLlmStream.ts, frontend/src/useModelChoice.ts, frontend/src/types.ts.
+4. Possible application bugs: any place where a test asserts behavior that looks contrary to intended behavior, or where you noticed the app itself violating intended behavior. Give evidence. Write "none" if there are none.

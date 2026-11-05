@@ -1,0 +1,13 @@
+diff --git a/backend/app/services/arxiv.py b/backend/app/services/arxiv.py
+index d0bed1a..3afd7df 100644
+--- a/backend/app/services/arxiv.py
++++ b/backend/app/services/arxiv.py
+@@ -44,7 +44,7 @@ def build_query(query: str) -> str | None:
+     clean = " ".join(re.sub(r"[^\w\s-]", " ", query).split())
+     if not re.search(r"\w", clean):
+         return None
+-    words = [w for w in re.split(r"[\s-]+", clean) if w and w.lower() not in STOPWORDS]
++    words = [w for w in re.split(r"[\s-]+", clean) if w]
+     parts = [f'ti:"{clean}"', f'abs:"{clean}"']
+     if words:
+         parts.append("(" + " AND ".join(f"(ti:{w} OR abs:{w})" for w in words) + ")")

@@ -1,0 +1,29 @@
+You are reviewing part of an automated test suite for correctness. Repository: /Users/hongxiangzhang/Documents/593-demo/AI_Research_Assistant (FastAPI backend in backend/, React frontend in frontend/). Work only inside this directory. This is a READ-ONLY review: do not create, edit, or delete any file, and do not commit. You may run tests (for example `cd backend && uv run pytest tests/test_library.py -q`); do not start servers on ports 8000 or 5173.
+
+Files to review (every test in them):
+- backend/tests/test_library.py
+- backend/tests/test_upload.py
+- backend/tests/test_app.py
+plus the helpers they use (backend/tests/conftest.py, backend/tests/support/papers.py, backend/tests/support/pdfs.py).
+
+The oracle is the app's INTENDED behavior, never its current output:
+1. Requirements F1-F5 and acceptance criteria in docs/REQUIREMENTS.md
+2. Behavior documented for users in README.md and INSTALL.md, and UI text
+3. Intent stated in code comments and docstrings in backend/app and frontend/src
+A test that passes is not necessarily correct: a test can pass because it asserts buggy current behavior.
+
+Give each test exactly one primary category:
+- OK: checks intended behavior with correct inputs and expected values, and its assertion would fail if that behavior broke.
+- WEAK: checks the right behavior, but the assertion would still pass under a plausible bug (only a status code; only `is not None` or a length; a mock was called but its arguments are unchecked; a value checked so loosely that a wrong value passes).
+- WRONG: the expectation contradicts intended behavior, the inputs make the check meaningless, or the test passes for the wrong reason (asserts on its own fake instead of the app).
+- REDUNDANT: same behavior, same kind of input, and same assertions as another test; adds no detection power. Name the other test.
+- BRITTLE: checks an implementation detail that no requirement or documented behavior needs, so a correct refactor would break it.
+- FLAKY: outcome depends on network, wall-clock time, test order, the machine's .env, a real CLI, or sleeps.
+
+Be strict and concrete. For WEAK, name the plausible bug that would slip through. For WRONG, quote the intended behavior (file and line) that the test contradicts. Do not pad: most tests may well be OK.
+
+Reply with exactly these sections:
+1. Counts: for each file, the number of test functions (count each parametrize case once per function, and state how many parametrized cases exist), and the number in each category.
+2. Findings: one row per non-OK test, as a Markdown table: `file::test_name | category | reason (with line numbers) | how to fix it`.
+3. Missing tests: requirement-level behaviors or error paths in this area that no test exercises (say which requirement or documented behavior each belongs to). Check against the code in backend/app/routers/papers.py, backend/app/services/fulltext.py, backend/app/services/cache.py, backend/app/main.py, backend/app/db.py.
+4. Possible application bugs: any place where a test asserts behavior that looks contrary to intended behavior, or where you noticed the app itself violating intended behavior. Give evidence. Write "none" if there are none.

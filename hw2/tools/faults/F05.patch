@@ -1,0 +1,12 @@
+diff --git a/frontend/src/useLlmStream.ts b/frontend/src/useLlmStream.ts
+index 9dcd10b..cba9245 100644
+--- a/frontend/src/useLlmStream.ts
++++ b/frontend/src/useLlmStream.ts
+@@ -38,7 +38,6 @@ export function useLlmStream() {
+             setText((t) => t + e.text)
+             break
+           case 'reset':
+-            setText('')
+             break
+           case 'error':
+             failed = true

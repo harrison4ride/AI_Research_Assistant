@@ -1,0 +1,26 @@
+{
+  "initial": {
+    "backend_line": 94.4,
+    "backend_branch": 87.5,
+    "frontend_line": 81.2,
+    "frontend_branch": 78.47,
+    "mutation": 76.1,
+    "faults": 17
+  },
+  "round1": {
+    "backend_line": 97.0,
+    "backend_branch": 91.7,
+    "frontend_line": 94.62,
+    "frontend_branch": 86.09,
+    "mutation": 77.6,
+    "faults": 17
+  },
+  "round2": {
+    "backend_line": 98.6,
+    "backend_branch": 95.7,
+    "frontend_line": 94.78,
+    "frontend_branch": 86.09,
+    "mutation": 89.4,
+    "faults": 17
+  }
+}
